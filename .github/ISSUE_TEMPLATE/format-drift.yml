@@ -6,8 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        A scrubbed journal sample from a new Claude Code version is the single
-        most valuable contribution. **Never paste unscrubbed journal content** —
+        A scrubbed transcript sample from a new Claude Code version is the single
+        most valuable contribution. **Never paste unscrubbed transcript content** —
         these files contain real conversation text. Replace every task/result
         with placeholder text and keep only the structure.
   - type: input

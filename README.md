@@ -69,8 +69,8 @@ issue here. Developed and tested on 2.1.304–2.1.308.
 - **Hebrew and English**, one click apart; Hebrew flips the layout to RTL.
 - **A 5-hour usage meter** in the office header and the status line, with a
   heads-up toast at 80% and 95% of the window.
-- **A demo** — ⚙️ → *Demo* fills the office with synthetic agents, so you can look
-  around without a single real subagent.
+- **A demo** — ⚙️ → *Demo* (or `d`), as above, for a populated office with no
+  real subagent.
 - It **opens itself** when your first subagent starts (or run `/theater`), and a
   finish gets a short toast naming the conversation plus a chime (mute with 🔔).
 - In a terminal, VS Code or mobile session the same pane draws as **text cards**.
@@ -100,8 +100,8 @@ keep them on your machine:
 
 - **Read-only.** It only reads your local Claude Code transcripts
   (`~/.claude/projects`, plus the open-conversations registry in
-  `~/.claude/sessions`); the only file of its own it reads is its small logo, which
-  ships in the mod's folder.
+  `~/.claude/sessions`); the only files of its own it touches are its small logo
+  and its finish chime, which ship in the mod's folder.
 - **Writes nothing** outside its own settings (language, sound, pins).
 - **Never transmits** anything anywhere — no network calls, no telemetry.
 - **No server, no port.** The pane is drawn inside your Claude Code session;

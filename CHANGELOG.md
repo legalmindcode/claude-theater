@@ -30,9 +30,10 @@ function-hooks API, which may change between releases.
   server that drew the office at `http://localhost:7333` — leaves the repository,
   and with it everything that only existed to run, package, test or publish it:
   the PyPI / pipx packaging (`pyproject.toml`, `pip install claude-theater`,
-  `python -m claude_theater`, `start.cmd`), the `SessionStart` auto-start hooks,
-  the Python test suite and the `fixtures/` samples (the mod's scanner tests carry
-  verbatim copies inline), the Python CI matrix and the PyPI release workflow.
+  `python -m claude_theater`, `start.cmd`), the README's `SessionStart`
+  auto-start recipe, the Python test suite and the `fixtures/` samples (the mod's
+  scanner tests carry verbatim copies inline), the Python CI matrix and the PyPI
+  release workflow.
 - **The VS Code extension** (`vscode-extension/`) and its publish workflow. It
   bundled that server into the `.vsix`, spawned it and embedded its page in a
   webview, so it cannot work without it.

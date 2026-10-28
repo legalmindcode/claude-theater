@@ -10,8 +10,9 @@ product, so this policy doubles as a short statement of how it protects you.
 - **Read-only.** It reads the transcripts Claude Code already writes
   (`~/.claude/projects`, plus the open-conversations registry in
   `~/.claude/sessions`); it never modifies them and never starts, stops, or
-  talks to your agents. The only file of its own it reads is its small logo; it
-  writes nothing outside its own settings (language, sound, pins).
+  talks to your agents. The only files of its own it touches are its small logo
+  and its finish chime; it writes nothing outside its own settings (language,
+  sound, pins).
 - **Nothing leaves your machine.** No telemetry, no analytics, no outbound
   network calls. Your conversations and code stay on your computer.
 - **No third-party runtime dependencies.** A handful of TypeScript modules over
@@ -22,8 +23,9 @@ product, so this policy doubles as a short statement of how it protects you.
 
 ## Supported versions
 
-This is a `0.x` project; only the latest published version is supported.
-Please reproduce on the latest release before reporting.
+This is a `0.x` project; only the mod as this repository's marketplace installs
+it from `main` is supported. Please update the plugin and reproduce before
+reporting.
 
 ## Reporting a vulnerability
 
