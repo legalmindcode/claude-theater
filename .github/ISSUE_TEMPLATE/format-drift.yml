@@ -1,5 +1,5 @@
 name: Format-drift report
-description: A Claude Code version renders oddly or trips the version banner
+description: A Claude Code version renders oddly (a missing room, a wrong status, an empty task)
 title: "[drift] "
 labels: ["format-drift"]
 body:
@@ -22,7 +22,7 @@ body:
     id: what
     attributes:
       label: What looked wrong?
-      description: The banner text, a mislabeled or empty agent, a missing room, wrong status…
+      description: A mislabeled or empty agent, a missing room, a wrong status, a conversation that never appears…
     validations:
       required: true
   - type: textarea

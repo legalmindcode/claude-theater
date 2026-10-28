@@ -14,13 +14,13 @@ body:
     id: env
     attributes:
       label: Environment
-      description: OS, Python version, Claude Code version, claude-theater version (`claude-theater --version`).
-      placeholder: "Windows 11, Python 3.12, Claude Code 2.1.x, claude-theater 0.1.0"
+      description: OS, Claude Code version (`claude --version`), where the pane ran (desktop app Code tab / terminal / VS Code), and the mod version (`desktop-mod/.claude-plugin/plugin.json`).
+      placeholder: "Windows 11, Claude Code 2.1.308, desktop app Code tab, agent-theater 0.5.0"
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
       label: Console output (optional)
-      description: Anything Claude Theater printed to the terminal. Redact any paths/content you'd rather not share.
+      description: Anything the mod wrote to the Claude Code debug log, or the text the pane showed. Redact any paths/content you'd rather not share.
       render: text

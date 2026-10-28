@@ -6,9 +6,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 SemVer policy for this tool:
 
-- **PATCH** — parser fixes / new Claude Code build adapters.
-- **MINOR** — new format adapters, themes, languages, dashboard additions.
-- **MAJOR** — breaking changes to the dashboard or the emitted API shape.
+- **PATCH** — scanner fixes / new Claude Code build adapters.
+- **MINOR** — new format adapters, themes, languages, additions to the pane.
+- **MAJOR** — breaking changes to the pane or the payload shape.
 
 ## Tested against Claude Code
 
@@ -23,6 +23,32 @@ The 2.1.304+ floor is the desktop mod's: it is built on Claude Code's early-acce
 function-hooks API, which may change between releases.
 
 ## [Unreleased]
+
+### Removed
+
+- **The Python app and its browser UI.** `claude_theater.py` — the single-file
+  server that drew the office at `http://localhost:7333` — leaves the repository,
+  and with it everything that only existed to run, package, test or publish it:
+  the PyPI / pipx packaging (`pyproject.toml`, `pip install claude-theater`,
+  `python -m claude_theater`, `start.cmd`), the `SessionStart` auto-start hooks,
+  the Python test suite and the `fixtures/` samples (the mod's scanner tests carry
+  verbatim copies inline), the Python CI matrix and the PyPI release workflow.
+- **The VS Code extension** (`vscode-extension/`) and its publish workflow. It
+  bundled that server into the `.vsix`, spawned it and embedded its page in a
+  webview, so it cannot work without it.
+
+The last *published* version carrying them is **0.4.0** — the latest release on
+PyPI (`pip install claude-theater==0.4.0`) and the latest GitHub release, with its
+`.vsix`; the 0.5.0 sources of the app stay in the git history before this change.
+**The Claude desktop app mod under `desktop-mod/` is the product**:
+`/plugin marketplace add legalmindcode/claude-theater`, then
+`/plugin install agent-theater@claude-theater`.
+
+### Changed
+
+- README, CONTRIBUTING, ROADMAP and SECURITY describe the mod only; the install
+  lines lead the README. CI runs `claude plugin validate` and `claude plugin test`
+  on `desktop-mod/` instead of the Python matrix.
 
 ## [0.5.0] - 2026-10-23
 
