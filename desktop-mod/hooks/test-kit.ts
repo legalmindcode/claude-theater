@@ -27,6 +27,13 @@ export const T0 = 1_700_000_000_000
 
 /** An in-memory ~/.claude for `beneath`: path → text + mtime (the size is the text's length unless `size` says otherwise: an oversized transcript). */
 export type MemFiles = Map<string, { text: string; mtimeMs: number; size?: number }>
+/**
+ * The fake home the environment beneath answers for HOME / USERPROFILE, and the root the in-memory files are keyed
+ * under. A path absolute on EVERY platform: the engine resolves a relative path against the plugin's folder and
+ * skips the test's fs hooks when it does not exist there — on a Linux runner `C:/Users/test` is relative, so the
+ * scanner found an empty ~/.claude and eight tests failed in CI (28.10).
+ */
+export const TEST_HOME = '/home/test'
 
 /** The $.state writes of the plugin, by key: the five the flicker guard budgets always present, any other key once written. */
 export type Writes = { payload: number; scanError: number; view: number; tick: number; prefs: number } & Record<string, number>
@@ -102,7 +109,7 @@ export function beneath(on: On, current: () => Agent[], store: Record<string, un
   on('store.delete', ($, e) => { delete captured.store[e.key]; return { value: undefined } })
   on('store.keys', () => ({ value: Object.keys(captured.store) }))
   // the environment beneath (what mock.env would hook), with a failure switch for the failed-scan test
-  const env: Record<string, string> = { HOME: 'C:/Users/test', USERPROFILE: 'C:/Users/test' }
+  const env: Record<string, string> = { HOME: TEST_HOME, USERPROFILE: TEST_HOME }
   on('env.get', ($, e) => {
     if (e.name === 'HOME' && captured.onScan) {
       const during = captured.onScan
@@ -133,8 +140,14 @@ export function beneath(on: On, current: () => Agent[], store: Record<string, un
     }
     return dirs
   }
-  // (the engine hands a hook the path in the platform's separators: back to "/")
-  const norm = (p: string) => p.split("\\").join("/")
+  // (the engine hands a hook the path RESOLVED in the platform's way — its separators, and on Windows a drive before a
+  // rooted path: `/home/test/...` arrives as `C:/home/test/...` — so back to "/" and cut to the fake home, which is what
+  // the in-memory files are keyed under)
+  const norm = (p: string) => {
+    const s = p.split("\\").join("/")
+    const i = s.indexOf(TEST_HOME)
+    return i >= 0 && (s.length === i + TEST_HOME.length || s[i + TEST_HOME.length] === '/') ? s.slice(i) : s
+  }
   on('fs.exists', ($, e) => ({ value: files !== undefined && (files.has(norm(e.path)) || dirsOf().has(norm(e.path))) }))
   on('fs.list', ($, e) => {
     if (!files) return { value: [] }
