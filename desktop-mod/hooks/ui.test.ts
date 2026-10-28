@@ -25,7 +25,7 @@ import { CREDIT_ROWS, REFUSED_RE, chromeRows, emptyLines, fixedRows, helpRows, o
 import { CREDIT, CREDIT_SITE, CREDIT_URL, LOGO_ALT, LOGO_CELLS, logoMarkdown, nb, rowCount } from './office-layout'
 import { OFFICE_KEY, assertJson } from './office-props'
 import type { OfficeAgent, OfficeProps } from './office-props'
-import { T0, beneath, type MemFiles } from './test-kit'
+import { T0, TEST_HOME, beneath, type MemFiles } from './test-kit'
 
 const SA = 'sess-aaaa-1111-frontend'
 const SB = 'sess-bbbb-2222-research'
@@ -329,8 +329,8 @@ async function tintShown(ui: { findAll: (q: { in?: string; type?: string }) => P
   return (await ui.findAll({ in: OFFICE_KEY })).some(n => n.props.backgroundColor !== undefined && !overlay(n.props))
 }
 
-/** A quiet office on disk (HOME = C:/Users/test): one open conversation (its lead answering on Fable) with two subagents, one of them on Opus. */
-const QHOME = 'C:/Users/test'
+/** A quiet office on disk (HOME = TEST_HOME): one open conversation (its lead answering on Fable) with two subagents, one of them on Opus. */
+const QHOME = TEST_HOME
 const QPROJ = `${QHOME}/.claude/projects/-C-x`
 const QSESS = 'sess-quiet-0001'
 const Q1 = `${QPROJ}/${QSESS}/subagents/agent-q1.jsonl`

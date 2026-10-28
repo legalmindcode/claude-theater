@@ -1,14 +1,3 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.eggs/
-build/
-dist/
-.pytest_cache/
-.venv/
-venv/
-
 # OS / editor
 .DS_Store
 Thumbs.db
@@ -18,11 +7,6 @@ Thumbs.db
 # Internal launch/strategy/planning notes — kept local, not shipped.
 DISTRIBUTION.md
 UPGRADE-PLAN.md
-
-# VS Code extension build artifacts (the bundled server copy is generated at
-# package time by vscode:prepublish; the .vsix is a build output)
-vscode-extension/claude_theater.py
-vscode-extension/*.vsix
 
 # Local marketing / post assets (screenshots for social posts, not shipped)
 post-assets/
