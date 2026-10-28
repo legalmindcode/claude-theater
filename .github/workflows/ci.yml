@@ -14,71 +14,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: test (${{ matrix.os }} / py${{ matrix.python-version }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
-        exclude:
-          # macos-latest is arm64 (macos-15); actions/setup-python has no
-          # darwin-arm64 build for 3.9. 3.9 is still covered on Linux + Windows.
-          - os: macos-latest
-            python-version: "3.9"
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: ${{ matrix.python-version }}
-      # Pure stdlib: golden parser/contract tests run with no dependencies.
-      - name: Run tests
-        run: python -m unittest discover -s tests -v
-
-  smoke:
-    name: install smoke (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: "3.12"
-      # Install the real package and prove the served endpoints work end-to-end.
-      - run: pip install .
-      - run: python tests/smoke_serve.py
-
-  lint:
-    name: lint (ruff)
+  mod:
+    name: desktop-mod (validate + test)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          python-version: "3.12"
-      - run: pipx run ruff check .
-
-  build:
-    name: build + metadata check
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: "3.12"
-      - name: Build sdist + wheel
-        run: pipx run build
-      - name: Validate distribution metadata
-        run: pipx run twine check dist/*
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: dist
-          path: dist/*
+          node-version: "22"
+      # The mod is developed and tested on Claude Code 2.1.308 (its floor is 2.1.304).
+      # Exact-version install: `claude plugin test` runs the mod's *.test.ts files inside
+      # this binary, so the version installed here is the version under test.
+      - name: Install Claude Code
+        run: npm install --global @anthropic-ai/claude-code@2.1.308
+      - name: Validate the marketplace manifest
+        run: claude plugin validate .
+      - name: Validate the plugin
+        run: claude plugin validate desktop-mod
+      - name: Run the mod's tests
+        run: claude plugin test desktop-mod
