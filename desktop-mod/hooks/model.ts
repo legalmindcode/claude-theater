@@ -209,8 +209,10 @@ export const USAGE = { fiveHour: null as { pct: number; resetsAt: string } | nul
 /**
  * The desktop office's fallback switch: while `clientFailed` the desktop draws
  * the text cards instead of the office Client. Set by register.tsx on a
- * `ui.fault` of the office module, cleared by /theater (the Client is tried
- * again); read by ui.tsx's render. Module memory: a hot reload clears it too.
+ * `ui.fault` of the office module, cleared by a retry, a spawn or an opening of
+ * the pane with the retries spent, and by /theater (the Client is tried again:
+ * CLIENT_RETRIES); read by ui.tsx's render. Module memory: a hot reload clears
+ * it too.
  */
 export const DESKTOP = { clientFailed: false }
 
@@ -235,13 +237,21 @@ export const LOGO_ASSET = 'assets/lm-logo-48.png'
 export const LOGO_MAX_CHARS = 4096
 
 /**
- * THE CLIENT'S RETRIES (live check 8, 23.10): a fault of the office Client is most often the surface's first
- * draw timing out while the plugin's worker is busy with the first transcript scan ("did not answer a render
- * within 2000ms of a loaded frame" at the pane's auto-open on the first subagent spawn; the same module drew
- * fine seconds later in a probe pane) — and the person could not run /theater to try again (the command was not
- * listed in that conversation). So register.tsx's `ui.fault` hook tries the Client again by itself: once per
- * fault, CLIENT_RETRY_MS after it ($.clock.after — the scan is done by then), up to CLIENT_RETRIES retries per
- * session (module memory, reset by /theater); only then do the text cards stay.
+ * THE CLIENT'S RETRIES (live check 8, 23.10; the diagnosis of 28.10-1.11): the office Client faults while the
+ * desktop's page is starved — the module never faults on its own data (the kit draws every size without one), but
+ * the surface times every stage (the frame's shell, its runtime, the module's load: 10 s; a render: 2 s), and the
+ * app's own memory-pressure and event-loop-stall warnings sit beside 72 of the 85 faults it logged in three weeks
+ * (16% of random moments do) — in waves that two retries 3 s apart never outlast, so the text cards stayed for the
+ * rest of the conversation (live check 8 saw the first of them: the Client's first draw timing out at the auto-open
+ * on the first subagent spawn, with no /theater listed to try again). So register.tsx's `ui.fault` hook tries the
+ * Client again CLIENT_RETRY_MS after a fault ($.clock.after), the gap doubled per retry up to CLIENT_RETRY_MAX_MS
+ * (3, 6, 12, 24, 48, 60, 60 … s), CLIENT_RETRIES times per wave — about eight minutes — before the cards stay; a
+ * fault CLIENT_ALIVE_GAP_MS or more after the last one came from a Client that had drawn for a while (between two
+ * faults of a wave the cards show for the gap and the surface's load wait at most: under 75 s), so the wave starts
+ * anew; a subagent spawn or an opening of the pane with the wave spent tries the Client at once (retryClientNow);
+ * /theater at once, the person's own. Module memory, reset by /theater.
  */
-export const CLIENT_RETRIES = 2
+export const CLIENT_RETRIES = 10
 export const CLIENT_RETRY_MS = 3000
+export const CLIENT_RETRY_MAX_MS = 60_000
+export const CLIENT_ALIVE_GAP_MS = 90_000

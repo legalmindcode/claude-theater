@@ -6,8 +6,10 @@
 // each post into the same prefs / view / $.store change the text cards' press
 // makes, one atom per message; anything else it ignores. And the fallback: a
 // `ui.fault` of the office (register.tsx) draws the text cards and toasts
-// once; the Client is tried again by itself (CLIENT_RETRY_MS later, CLIENT_RETRIES
-// times), and `/theater` tries it again at once.
+// once; the Client is tried again by itself (CLIENT_RETRY_MS later, the gap
+// doubled per retry up to CLIENT_RETRY_MAX_MS, CLIENT_RETRIES times per wave; a
+// wave anew once the Client was up CLIENT_ALIVE_GAP_MS, or at a subagent spawn
+// with the wave spent), and `/theater` tries it again at once.
 //
 // A post is seen only by the posting plugin's own hooks (never a test hook
 // beneath), so these tests read its effects: the store, the counted $.state
@@ -17,7 +19,7 @@ import { expect, test } from 'claude-code/testing'
 import type { JsonValue } from 'claude-code'
 
 import type { Agent } from './model'
-import { CLIENT_RETRIES, CLIENT_RETRY_MS, LOGO_ASSET, PERSONA_EMOJI, POLL_MS } from './model'
+import { CLIENT_ALIVE_GAP_MS, CLIENT_RETRIES, CLIENT_RETRY_MAX_MS, CLIENT_RETRY_MS, LOGO_ASSET, PERSONA_EMOJI, POLL_MS } from './model'
 import { SEARCH_MAX } from './office-chrome'
 import { logoMarkdown } from './office-layout'
 import { SEARCH_DEBOUNCE_MS } from './office-client'
@@ -309,16 +311,22 @@ test('ui.fault on the office: the desktop falls back to the text cards and toast
 })
 
 /**
- * THE CLIENT'S RETRIES (live check 8, 23.10): the Client's first draw timed out while the worker scanned, and the office
- * stayed on the text cards for the whole conversation (no /theater to try again). The kit's clock holds the module's
- * `$.clock.after`; `clock.advance(CLIENT_RETRY_MS)` crosses the retry's due time, as the engine's clock does.
+ * THE CLIENT'S RETRIES (live check 8, 23.10; the 1.11 diagnosis): the Client's first draw timed out while the worker scanned,
+ * and the office stayed on the text cards for the whole conversation (no /theater to try again). Then the diagnosis of
+ * 28.10-1.11 (model.ts CLIENT_RETRIES): the faults come in waves while the host is starved, and two retries 3 s apart never
+ * outlast a wave. The kit's clock holds the module's `$.clock.after` and `$.clock.now`; `clock.advance(ms)` crosses a retry's
+ * due time, as the engine's clock does.
  */
-// (mounts, faults, redraws and clock advances through the kit: the budget is load headroom, as the fault test's)
-test('ui.fault on the office, the retries (live check 8): the Client is drawn again CLIENT_RETRY_MS after a fault, silently; CLIENT_RETRIES retries per session, then the cards stay; /theater counts them anew and drops a pending one', { timeoutMs: 30_000 }, async ($, on) => {
-  expect(CLIENT_RETRIES).toBe(2)
+// (mounts, faults, redraws, spawns and clock advances through the kit: the budget is load headroom, as the fault test's)
+test('ui.fault on the office, the retries: the Client is drawn again after a fault with a growing gap — CLIENT_RETRY_MS, doubled per retry up to CLIENT_RETRY_MAX_MS — CLIENT_RETRIES times per wave, silently, then the cards stay; a fault CLIENT_ALIVE_GAP_MS after the last (the Client was up between) starts a wave anew; a subagent spawn with the wave spent tries the Client at once; /theater at once, counted anew, told again, a pending retry dropped', { timeoutMs: 60_000 }, async ($, on) => {
+  expect(CLIENT_RETRIES).toBe(10)
   expect(CLIENT_RETRY_MS).toBe(3000)
+  expect(CLIENT_RETRY_MAX_MS).toBe(60_000)
+  expect(CLIENT_ALIVE_GAP_MS).toBe(90_000)
   const logs: string[] = []
   on('ui.log', ($, e) => { logs.push(e.text); return { value: undefined } })
+  // the engine beneath starts each subagent and names it (the spawn's own hook auto-opens the pane once and polls)
+  on('agent.spawn', ($, e) => ({ model: 'haiku', agentId: `live-${e.tool_use_id}` }))
   const { captured, clock } = beneath(on, () => fixture(), PREFS())
   await $.session.start({ cwd: 'C:/x', surface: 'desktop', isInteractive: true })
   await clock.advance(POLL_MS)
@@ -338,33 +346,55 @@ test('ui.fault on the office, the retries (live check 8): the Client is drawn ag
     expect(await ui.find({ key: 'open:a1' })).toBeDefined()
     await ui.redraw({ ...PANE.props })
   }
-  /** The retry: not yet due a millisecond short of CLIENT_RETRY_MS, due at it — the Client is drawn again, a fresh instance. */
-  const retry = async () => {
-    await clock.advance(CLIENT_RETRY_MS - 1)
-    expect(await ui.find({ type: 'Client' })).toBeUndefined()
+  /** The retry: not yet due a millisecond short of `ms`, due at it — the Client is drawn again, a fresh instance. */
+  const retry = async (ms: number) => {
+    await clock.advance(ms - 1)
+    expect(await ui.find({ type: 'Client' }), `${ms} ms: a millisecond short`).toBeUndefined()
     await clock.advance(1)
-    expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
+    expect((await ui.find({ type: 'Client' }))?.key, `${ms} ms: due`).toBe(OFFICE_KEY)
     expect(await ui.find({ key: 'open:a1' })).toBeUndefined()
   }
-  // the first fault: told once (toast and transcript line), then the retry draws the Client again
+  const spawn = (id: string) => $.agent.spawn({ tool_use_id: id, prompt: 'Read it.', description: `desc ${id}`, subagentType: 'Explore', parentModel: 'opus' } as Parameters<typeof $.agent.spawn>[0])
+  /** One wave's gaps: CLIENT_RETRY_MS doubled per retry, capped at CLIENT_RETRY_MAX_MS, CLIENT_RETRIES of them. */
+  const WAVE = [3000, 6000, 12_000, 24_000, 48_000, 60_000, 60_000, 60_000, 60_000, 60_000]
+  expect(WAVE).toHaveLength(CLIENT_RETRIES)
+  // the first fault: told once (toast and debug line); then the whole wave, every retry silent
   await fault()
   expect(captured.toasts).toHaveLength(1)
   expect(failures()).toBe(1)
-  await retry()
-  // the retry's Client faults again: the next retry, and nothing more is said
-  await fault()
+  for (const ms of WAVE) {
+    await retry(ms)
+    await fault()
+  }
   expect(captured.toasts).toHaveLength(1)
   expect(failures()).toBe(1)
-  await retry()
-  // the third fault: CLIENT_RETRIES (2) retries are spent — the cards stay over the redraws, the polls and any wait
-  await fault()
-  await clock.advance(CLIENT_RETRY_MS * 3)
+  // the wave spent: the cards stay over the redraws, the polls and any wait
+  await clock.advance(CLIENT_RETRY_MAX_MS * 3)
   await clock.advance(POLL_MS * 3)
   expect(await ui.find({ type: 'Client' })).toBeUndefined()
   expect(await ui.find({ key: 'open:a1' })).toBeDefined()
+  // a subagent starts in this conversation: the office matters now — the Client is tried at once, silently, a wave anew
+  await spawn('t-1')
+  expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
+  expect(captured.toasts).toHaveLength(1)
+  await fault()
   expect(captured.toasts).toHaveLength(1)
   expect(failures()).toBe(1)
+  await retry(WAVE[0]!)
+  // a spawn while a wave runs changes nothing: the pending retry keeps its time
+  await fault()
+  await spawn('t-2')
+  expect(await ui.find({ type: 'Client' })).toBeUndefined()
+  await retry(WAVE[1]!)
+  // THE CLIENT UP BETWEEN: a fault CLIENT_ALIVE_GAP_MS after the last one came from a Client that drew for a while (the cards
+  // never show that long between two faults of a wave), so the wave starts anew — the next gap is the first, not the third
+  await clock.advance(CLIENT_ALIVE_GAP_MS)
+  expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
+  await fault()
+  expect(captured.toasts).toHaveLength(1) // (silent: the person was told once since /theater)
+  await retry(WAVE[0]!)
   // /theater still brings the Client back at once and counts the retries anew: a fault after it is told again and retried again
+  await fault()
   await $.command.run(THEATER)
   expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
   await fault()

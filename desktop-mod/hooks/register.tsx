@@ -105,7 +105,10 @@
 //                   DESKTOP.clientFailed first, so a failed office Client is tried again.
 //   ui.fault        the desktop office Client (OFFICE_KEY) failed → DESKTOP.clientFailed:
 //                   the desktop pane draws the text cards; one toast; a redraw; then
-//                   the Client is tried again CLIENT_RETRY_MS later, CLIENT_RETRIES times.
+//                   the Client is tried again CLIENT_RETRY_MS later, the gap doubled per
+//                   retry up to CLIENT_RETRY_MAX_MS, CLIENT_RETRIES times per wave (a wave
+//                   anew once the Client was up CLIENT_ALIVE_GAP_MS, or at a subagent spawn
+//                   / an opening of the pane with the wave spent: retryClientNow).
 //   (ui.message     the office Client's posts: ui.tsx registerUi, beside the press
 //                   handlers it shares with the text cards.)
 // Every hook: wrapped in try/catch AND `.catch` so the office never blocks Claude.
@@ -117,7 +120,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import { I18N } from './i18n'
 import { liveAgentReturned, liveAged, liveSpawned, liveToolReturned, liveToolStarted, mergeLive, type LiveMap } from './live'
-import { BRAND, CLIENT_RETRIES, CLIENT_RETRY_MS, COMMAND, DEFAULT_PREFS, DEFAULT_VIEW, DESKTOP, EMPTY_PAYLOAD, LOGO_ASSET, LOGO_MAX_CHARS, PANE_ID, POLL_MS, STORE_PREFS_KEY, STORE_USAGE_TOAST_KEY, USAGE, type Agent, type Payload, type Prefs, type TheaterStatus } from './model'
+import { BRAND, CLIENT_ALIVE_GAP_MS, CLIENT_RETRIES, CLIENT_RETRY_MAX_MS, CLIENT_RETRY_MS, COMMAND, DEFAULT_PREFS, DEFAULT_VIEW, DESKTOP, EMPTY_PAYLOAD, LOGO_ASSET, LOGO_MAX_CHARS, PANE_ID, POLL_MS, STORE_PREFS_KEY, STORE_USAGE_TOAST_KEY, USAGE, type Agent, type Payload, type Prefs, type TheaterStatus } from './model'
 import { cleanAgentText } from './office-chrome'
 import { demoPayload, scanAll, type ScanIo } from './scanner'
 import { FINISH_TOAST_MS, RECENT_DONE, STORE_ROOM_DONE_KEY, finishToast, officeView, paneTitle, parseRoomDone, registerUi, rememberRoomDone, renderKey, roomTitle, starsOf, textSurfaceActive, workingCount } from './ui'
@@ -160,6 +163,7 @@ export async function openPane($: EngineInterface): Promise<void> {
   } catch {
     // no surface draws yet (an SDK / -p run), or a hook refused: the next spawn / /theater tries again
   }
+  retryClientNow($)
   void poll($)
 }
 
@@ -547,12 +551,32 @@ export async function poll($: EngineInterface): Promise<void> {
 /** The poll timer of this environment (a hot reload drops it with the environment; ensurePolling restarts it). */
 let ticker: Timer | undefined
 /**
- * THE CLIENT'S RETRIES (ui.fault below): the retries scheduled for the office Client this session (reset by /theater) and
- * the pending retry's timer (/theater cancels it: the person's own retry replaces the automatic one). Module memory, like
- * DESKTOP.clientFailed: a hot reload clears both.
+ * THE CLIENT'S RETRIES (ui.fault below): the retries spent on the office Client in this wave (reset by /theater, by a fault
+ * CLIENT_ALIVE_GAP_MS after the last, and by retryClientNow), the pending retry's timer (/theater cancels it: the person's
+ * own retry replaces the automatic one), the engine's clock at the last fault (0: none since this load), and whether the
+ * person was told — the toast and the debug line, once per /theater. Module memory, like DESKTOP.clientFailed: a hot
+ * reload clears them all.
  */
 let clientRetries = 0
 let clientRetryTimer: Timer | undefined
+let clientLastFaultAt = 0
+let clientTold = false
+/**
+ * THE OFFICE ASKED FOR AGAIN (a subagent spawn, the pane opened): the Client on the cards with its wave spent is tried again
+ * at once, the retries counted anew — silently (the person was told at the wave's first fault). A wave still running (a
+ * retry pending) keeps its own time; nothing while the Client is up. /theater (command.run) is the person's own, told
+ * again.
+ */
+function retryClientNow($: EngineInterface): void {
+  if (!DESKTOP.clientFailed || clientRetryTimer !== undefined) return
+  clientRetries = 0
+  DESKTOP.clientFailed = false
+  try {
+    $.ui.invalidate('ui.render')
+  } catch {
+    // nothing draws the pane now: its next draw is the Client's
+  }
+}
 /** THE DEMO SWITCH: the view.demo the render kick last polled for while the published payload disagreed (undefined once they agree). */
 let demoKicked: boolean | undefined
 
@@ -769,6 +793,7 @@ export const register: Register = on => {
       clientRetryTimer?.cancel()
       clientRetryTimer = undefined
       clientRetries = 0
+      clientTold = false
       if (DESKTOP.clientFailed) {
         DESKTOP.clientFailed = false
         try {
@@ -789,26 +814,36 @@ export const register: Register = on => {
   // THE OFFICE'S FALLBACK (spec §5): the desktop office Client (key OFFICE_KEY, office-client.tsx) failed — its
   // module did not load, its drawing failed, or its code threw after it drew. From now on the desktop pane draws
   // the text cards (DESKTOP.clientFailed, read by ui.tsx's render) and the person is told ONCE (the first fault since
-  // /theater). The first fault is most often the worker busy with the first scan (live check 8: the Client's first draw,
-  // at the auto-open on the first subagent spawn, did not answer within 2000ms; the same module drew fine seconds later
-  // in a probe pane — and /theater was not listed in that conversation, so the office stayed on the cards all along), so
-  // the Client is tried again after CLIENT_RETRY_MS, CLIENT_RETRIES times, before the fallback stays: ONE retry per
-  // fault ($.clock.after; it clears the flag and redraws, and the render builds the Client afresh), the next one
-  // scheduled only if that fresh Client faults too. A retry is silent (no second toast, no second log line);
-  // /theater (above) still clears the flag at once, restarts the count and cancels a retry still pending. Observe
-  // only: core answers `{}`. The engine redraws the site itself after a fault; the invalidate is for a fault it
-  // would not redraw for (a Client born in that redraw). `e.reason` is the surface's untrusted text: logged to the
-  // debug log, never parsed.
+  // /theater: `clientTold`). THE WAVES (the diagnosis of 28.10-1.11; model.ts CLIENT_RETRIES): the module never
+  // faults on its own data (the kit draws every size without one) — the faults come while the desktop's page is
+  // starved (the app's memory-pressure and stall warnings sit beside 72 of the 85 faults it logged), at every stage
+  // the surface times (the frame's shell, its runtime, the module's load, a render past 2 s), in waves that two
+  // retries 3 s apart never outlast (live check 8 saw the first: the Client's first draw timing out at the auto-open
+  // on the first subagent spawn, with no /theater listed to try again). So the Client is tried again CLIENT_RETRY_MS
+  // after a fault, the gap doubled per retry up to CLIENT_RETRY_MAX_MS, CLIENT_RETRIES times per wave, before the
+  // fallback stays: ONE retry per fault ($.clock.after; it clears the flag and redraws, and the render builds the
+  // Client afresh), the next one scheduled only if that fresh Client faults too; a fault CLIENT_ALIVE_GAP_MS or more
+  // after the last one came from a Client that had drawn for a while (between two faults of a wave the cards show for
+  // the gap and the surface's load wait at most), so the wave starts anew; a subagent spawn or an opening of the pane
+  // with the wave spent tries the Client at once (retryClientNow). A retry is silent (no second toast, no second log
+  // line); /theater (above) still clears the flag at once, restarts the count, cancels a retry still pending and tells
+  // again on the next fault. Observe only: core answers `{}`. The engine redraws the site itself after a fault; the
+  // invalidate is for a fault it would not redraw for (a Client born in that redraw). `e.reason` is the surface's
+  // untrusted text: logged to the debug log, never parsed.
   on('ui.fault', { element: 'office' }, async ($, e, next) => { // OFFICE_KEY, as a literal: validate reads a matcher statically
     try {
       if (!DESKTOP.clientFailed) {
         DESKTOP.clientFailed = true
-        const first = clientRetries === 0
+        // (the engine's clock, for the wave: a read that fails counts as no gap)
+        const now = await $.clock.now().catch(() => 0)
+        if (clientLastFaultAt !== 0 && now - clientLastFaultAt >= CLIENT_ALIVE_GAP_MS) clientRetries = 0
+        clientLastFaultAt = now
         // the retry is scheduled first: the log / toast below must not be able to lose it
         if (clientRetries < CLIENT_RETRIES) {
+          const gap = Math.min(CLIENT_RETRY_MS * 2 ** clientRetries, CLIENT_RETRY_MAX_MS)
           clientRetries++
           clientRetryTimer?.cancel()
-          clientRetryTimer = $.clock.after(CLIENT_RETRY_MS, () => {
+          clientRetryTimer = $.clock.after(gap, () => {
             clientRetryTimer = undefined
             // (a /theater since then cleared the flag itself; the guard keeps a late timer from clearing a newer fault's)
             if (!DESKTOP.clientFailed) return
@@ -820,7 +855,8 @@ export const register: Register = on => {
             }
           })
         }
-        if (first) {
+        if (!clientTold) {
+          clientTold = true
           // (the reason to the debug log alone: the transcript carried it for live check 4 only, 18.10 — gone with the release,
           // decision 27c; the toast below is what the person sees)
           $.ui.log(`office Client failed (${e.phase}): ${e.reason} [${e.component} ${e.module}]`, { to: 'debug' })
@@ -841,6 +877,9 @@ export const register: Register = on => {
     const ran = await next(e)
     try {
       ensurePolling($)
+      // THE OFFICE ASKED FOR AGAIN: a subagent starting is when the person looks at the office — a Client on the cards with
+      // its wave spent is tried once more (retryClientNow; a wave still running keeps its time)
+      retryClientNow($)
       const agentId = ran.agentId
       if (agentId !== undefined) {
         const now = await $.clock.now()

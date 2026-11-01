@@ -51,6 +51,20 @@ PyPI (`pip install claude-theater==0.4.0`) and the latest GitHub release, with i
   lines lead the README. CI runs `claude plugin validate` and `claude plugin test`
   on `desktop-mod/` instead of the Python matrix.
 
+### Fixed
+
+- **The desktop office no longer stays on the text cards for the rest of a
+  conversation.** The office Client faults while the app's page is starved —
+  the app's own memory-pressure and stall warnings sit beside 72 of the 85
+  faults it logged in three weeks — at every stage the surface times (the
+  frame's shell, its runtime, the module's load, a render past two seconds),
+  and in waves that the old two retries, three seconds apart, never outlasted.
+  The Client is now tried again with a growing gap (3, 6, 12, 24, 48, then 60
+  seconds), ten times per wave (about eight minutes); a Client that drew for a
+  while and faulted again starts a wave anew; a subagent starting, or the pane
+  being opened, with the wave spent tries it at once; `/theater` still brings
+  it back at once. Nothing changed in what the office draws.
+
 ## [0.5.0] - 2026-10-23
 
 The project and the desktop mod are released together: the mod's own version is

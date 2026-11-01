@@ -64,7 +64,8 @@
 //            surface's table has one (`'Client' in els`) and while
 //            !DESKTOP.clientFailed; a `ui.fault` of the module (register.tsx)
 //            sets the flag and the desktop falls through to the text cards below
-//            until /theater tries the Client again.
+//            until a retry (register.tsx, CLIENT_RETRIES) or /theater tries the
+//            Client again.
 //   rooms    one per conversation (session_full): pinned first 📌, then rooms with
 //            a running agent, then by last activity (PAGE's sort). Room header,
 //            one line: 📌/○ · 💬 topic-or-project (clipped from its end) · small
