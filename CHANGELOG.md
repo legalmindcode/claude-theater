@@ -30,13 +30,14 @@ function-hooks API, which may change between releases.
   When the office falls back to the text cards, and when it draws again, the mod
   now notes it in its own local storage: the time, the conversation's id, the
   stage at which the app gave up and its one-line reason, and which automatic
-  retry followed — and a note when `/theater` was run while the cards showed.
+  retry followed — a note when `/theater` was run while the cards showed, and
+  one line when the pane was opened again after a restart.
   It is there for diagnosing the next wave of faults, which never happen in the
   tests and whose trace in the app's logs is gone within days. It holds no
-  conversation text, keeps the newest 100 entries (about 30 KB), is written
-  beside the office's work and never delays it, and a session with no fall
-  writes nothing. Nothing changed in what the office draws; README and SECURITY
-  now say what the mod writes.
+  conversation text, keeps the newest 100 entries (about 30 KB) and is written
+  beside the office's work, never awaited by it; a session with no fall adds
+  nothing to the record, except that one line after a restart. Nothing changed
+  in what the office draws; README and SECURITY now say what the mod writes.
 
 ### Removed
 
@@ -101,6 +102,15 @@ PyPI (`pip install claude-theater==0.4.0`) and the latest GitHub release, with i
   you close it after it came back, the first subagent does not open it again in
   that process: the button above the prompt and `/theater` do. Desktop only;
   the terminal is unchanged.
+- **The pane's note keeps to the right conversation.** Found in review of the
+  change above, before any release: after a `/clear`, or when another
+  conversation was resumed in the same process, the note could be written and
+  later deleted under the conversation that had just ended, so the new one's
+  pane did not come back after a restart; and when the engine could not give
+  the conversation's id at the moment the pane was first seen or was closed,
+  the note was never written — or, worse, never deleted, and a pane you had
+  closed could come back. The mod now waits for the new conversation's id,
+  and asks again at the next five-second check until it has one.
 
 ## [0.5.0] - 2026-10-23
 

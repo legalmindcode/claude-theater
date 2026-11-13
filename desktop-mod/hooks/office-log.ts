@@ -78,7 +78,10 @@
 // and an `up`: about eight such waves; at the rate of the worst day seen,
 // thirteen falls in twenty hours, about a week), each about 300 characters on
 // disk: some 30 KB of the store file at the bound.
-// A session with no fall writes nothing at all.
+// A session with no fall adds nothing to the record — except one `reopen`
+// entry when its pane was opened again after a restart (register.tsx
+// reopenPane). (The pane's own mark, pane-mark.ts, is a different key and is
+// written by every desktop session whose pane was shown.)
 //
 // READING IT. The store file of the mod (`~/.claude/plugins/store/`, the file
 // whose name starts with the plugin's) is plain JSON: every key that starts

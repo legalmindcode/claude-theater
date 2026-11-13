@@ -225,6 +225,13 @@ export const PANE_MARKS_MAX = 200
  * trouble is not asked every POLL_MS for the life of the process.
  */
 export const PANE_FORGET_TRIES = 3
+/**
+ * After a session.end that leaves the process running under another conversation (a /clear, a resume), `$.session.id()`
+ * goes on answering the ENDED id until the engine has finished the end step. The mirror refuses that id this many times
+ * (one ask per poll: three polls, ten times the end step's 1.5 s bound) and then takes it as this conversation's again: an
+ * engine that kept the id after all must not leave a pane that is never marked — or, worse, a closed one never unmarked.
+ */
+export const PANE_ENDED_ASKS = 3
 
 // ---------------------------------------------------------------------------
 // Module objects shared between register.tsx (writes) and ui.tsx (reads) — no

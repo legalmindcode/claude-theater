@@ -17,7 +17,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Agent } from './model'
-import { CLIENT_RETRY_MS, PANE_FORGET_TRIES, PANE_MARKS_MAX, PANE_MARK_TTL_MS, PERSONA_EMOJI, POLL_MS, REOPEN_DELAY_MS, STORE_PANE_PREFIX } from './model'
+import { CLIENT_RETRY_MS, PANE_ENDED_ASKS, PANE_FORGET_TRIES, PANE_MARKS_MAX, PANE_MARK_TTL_MS, PERSONA_EMOJI, POLL_MS, REOPEN_DELAY_MS, STORE_PANE_PREFIX } from './model'
 import { OFFICE_LOG_PREFIX, officeLogKey, type OfficeLogEntry } from './office-log'
 import { OFFICE_KEY } from './office-props'
 import { T0, beneath } from './test-kit'
@@ -515,6 +515,145 @@ test('/clear (session.end `clear`): the process goes on under a NEW conversation
   expect(captured.store[next]).toBeUndefined()
   expect(captured.store[KEY]).toEqual({ at: T0 }) // the cleared conversation's: not this one's to delete
   expect(captured.storeDeleteTries).toEqual({ [next]: 1 })
+})
+
+test('THE PENDING REOPEN YIELDS EVEN WITH THE MARK STILL IN THE STORE: a pane the person opened with /theater inside the delay and then closed, whose delete the store refused every time, is not opened by the timer — the process saw it shown, and that alone decides', { timeoutMs: 60_000 }, async ($, on) => {
+  const { captured, clock } = beneath(on, () => [], { ...PREFS(), [KEY]: { at: T0 - 60_000 } })
+  captured.paneOpen = false
+  await $.session.start(DESKTOP_START)
+  await clock.advance(3000)
+  await $.command.run(THEATER)
+  await clock.settle()
+  const opens = captured.opens.length
+  expect(opens).toBeGreaterThanOrEqual(1)
+  captured.storeDeleteFails = 99 // the store's lock is never won
+  captured.paneOpen = false // the person closes it, still inside the delay
+  await clock.advance(POLL_MS)
+  expect(captured.store[KEY]).toBeDefined() // (the mark the timer would read is there, fresh, and no pane is listed)
+  await clock.advance(REOPEN_DELAY_MS * 2)
+  expect(captured.opens.length).toBe(opens)
+  expect(recordOf(captured.store)).toEqual([])
+  expect(captured.toasts).toEqual([])
+})
+
+test('A REOPEN THE HOST DID NOT TAKE SILENCES NOTHING: the opening rejected, so the person was never shown a pane — when the first subagent then opens the office and it falls, the fall toasts as at any opening', { timeoutMs: 60_000 }, async ($, on) => {
+  const { captured, clock } = beneath(on, () => office(), { ...PREFS(), [KEY]: { at: T0 - 3_600_000 } })
+  on('agent.spawn', ($, e) => ({ model: 'haiku', agentId: `live-${e.tool_use_id}` }))
+  captured.paneOpen = false
+  captured.openAnswer = 'down'
+  await $.session.start(DESKTOP_START)
+  await clock.advance(REOPEN_DELAY_MS)
+  await clock.settle()
+  expect(captured.paneOpen).toBe(false) // the reopen opened nothing
+  expect(captured.toasts).toEqual([])
+  captured.openAnswer = 'placed'
+  await $.agent.spawn(SPAWN('t1') as Parameters<typeof $.agent.spawn>[0]) // the first subagent: the auto-open
+  await clock.settle()
+  expect(captured.opens.length).toBeGreaterThanOrEqual(1)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
+  await ui.press({ key: 'help' })
+  await ui.redraw({ ...PANE.props, scroll: { offset: 20_000, bodyRows: 40 } }) // the fall, as in the test above
+  expect(await ui.find({ type: 'Client' })).toBeUndefined()
+  expect(captured.toasts).toHaveLength(1)
+  // (reset: the flag is the plugin bundle's module memory)
+  await ui.redraw({ ...PANE.props })
+  await $.command.run(THEATER)
+  await ui.unmount()
+})
+
+test('A CONVERSATION ID THAT CANNOT BE READ when the pane is first found shown: no mark yet, nothing thrown — and the first poll that can read it writes the mark, ONCE', { timeoutMs: 60_000 }, async ($, on) => {
+  const { captured, clock } = beneath(on, () => [], PREFS())
+  captured.sessionIdDown = true
+  await $.session.start(DESKTOP_START)
+  await clock.advance(POLL_MS) // two polls with the pane shown and no id
+  expect(paneKeys(captured.store)).toEqual([])
+  expect(captured.storeWrites).toEqual({})
+  captured.sessionIdDown = false
+  await clock.advance(POLL_MS)
+  expect(captured.store[KEY]).toEqual({ at: clock.now() })
+  expect(captured.storeWrites[KEY]).toBe(1)
+  for (let i = 0; i < 24; i++) await clock.advance(POLL_MS)
+  expect(captured.storeWrites[KEY]).toBe(1)
+  expect(captured.storeDeleteTries).toEqual({})
+  expect(captured.writes.scanError).toBe(0)
+})
+
+test('A CONVERSATION ID THAT CANNOT BE READ when the pane is closed: the mark an earlier process left is deleted by the first poll that can read the id — however long that takes — and the pending reopen opens nothing meanwhile', { timeoutMs: 60_000 }, async ($, on) => {
+  const { captured, clock } = beneath(on, () => [], { ...PREFS(), [KEY]: { at: T0 - 60_000 } })
+  captured.sessionIdDown = true
+  await $.session.start(DESKTOP_START) // (a reload: the pane is listed and shown)
+  await clock.advance(POLL_MS)
+  const opens = captured.opens.length
+  captured.paneOpen = false // the person's close, the id still unreadable
+  for (let i = 0; i < 12; i++) await clock.advance(POLL_MS) // (past the reopen's delay too)
+  expect(captured.store[KEY]).toEqual({ at: T0 - 60_000 })
+  expect(captured.storeDeleteTries).toEqual({}) // no key, so no store call: nothing to count against PANE_FORGET_TRIES
+  expect(captured.opens.length).toBe(opens)
+  captured.sessionIdDown = false
+  await clock.advance(POLL_MS)
+  expect(captured.store[KEY]).toBeUndefined()
+  expect(captured.storeDeletes).toEqual({ [KEY]: 1 })
+  for (let i = 0; i < 6; i++) await clock.advance(POLL_MS)
+  expect(captured.storeDeleteTries).toEqual({ [KEY]: 1 })
+  expect(captured.storeWrites[KEY]).toBeUndefined()
+  expect(captured.opens.length).toBe(opens)
+})
+
+test('/clear, A POLL BEFORE THE ENGINE SWITCHES THE ID: `$.session.id()` still answers the ended conversation for a moment after the hook — that poll marks nothing and caches nothing, and the first poll under the new id marks it (one write); the ended conversation\'s mark is neither rewritten nor deleted', { timeoutMs: 60_000 }, async ($, on) => {
+  const { captured, clock } = beneath(on, () => [], PREFS())
+  await $.session.start(DESKTOP_START)
+  await clock.advance(POLL_MS)
+  expect(captured.store[KEY]).toEqual({ at: T0 })
+  const next = `${STORE_PANE_PREFIX}next-session`
+  await $.session.end(END('clear'))
+  await clock.advance(POLL_MS) // the id not switched yet
+  expect(captured.storeWrites).toEqual({ [KEY]: 1 })
+  captured.sessionId = 'next-session'
+  await clock.advance(POLL_MS)
+  expect(captured.store[next]).toEqual({ at: clock.now() })
+  for (let i = 0; i < 6; i++) await clock.advance(POLL_MS)
+  expect(captured.storeWrites).toEqual({ [KEY]: 1, [next]: 1 })
+  captured.paneOpen = false
+  await clock.advance(POLL_MS)
+  expect(captured.store[next]).toBeUndefined()
+  expect(captured.store[KEY]).toEqual({ at: T0 })
+  expect(captured.storeDeleteTries).toEqual({ [next]: 1 })
+})
+
+test('/clear ON AN ENGINE THAT KEEPS THE ID (not what its types say): the ended id is refused PANE_ENDED_ASKS times and then taken as this conversation\'s again — the mark is written anew and a close still deletes it, so no closed pane is left marked', { timeoutMs: 60_000 }, async ($, on) => {
+  expect(PANE_ENDED_ASKS).toBe(3)
+  const { captured, clock } = beneath(on, () => [], PREFS())
+  await $.session.start(DESKTOP_START)
+  await clock.advance(POLL_MS)
+  await $.session.end(END('clear'))
+  await clock.advance(POLL_MS * PANE_ENDED_ASKS)
+  expect(captured.storeWrites[KEY]).toBe(1)
+  await clock.advance(POLL_MS)
+  expect(captured.storeWrites[KEY]).toBe(2)
+  expect(captured.store[KEY]).toEqual({ at: clock.now() })
+  captured.paneOpen = false
+  await clock.advance(POLL_MS)
+  expect(captured.store[KEY]).toBeUndefined()
+  expect(captured.storeDeleteTries).toEqual({ [KEY]: 1 })
+})
+
+test('session.end `resume` (another conversation takes this process over): as a /clear — the mirror goes on under the new id, so the pane still shown is marked for it, and its close deletes the mark an earlier process of THAT conversation left; the ended conversation\'s mark stays', { timeoutMs: 60_000 }, async ($, on) => {
+  const next = `${STORE_PANE_PREFIX}next-session`
+  const { captured, clock } = beneath(on, () => [], { ...PREFS(), [next]: { at: T0 - 60_000 } })
+  await $.session.start(DESKTOP_START)
+  await clock.advance(POLL_MS)
+  expect(captured.store[KEY]).toEqual({ at: T0 })
+  await $.session.end(END('resume'))
+  captured.sessionId = 'next-session'
+  await clock.advance(POLL_MS)
+  expect(captured.store[next]).toEqual({ at: clock.now() })
+  expect(captured.storeWrites).toEqual({ [KEY]: 1, [next]: 1 })
+  captured.paneOpen = false
+  await clock.advance(POLL_MS * 3)
+  expect(captured.store[next]).toBeUndefined()
+  expect(captured.storeDeleteTries).toEqual({ [next]: 1 })
+  expect(captured.store[KEY]).toEqual({ at: T0 })
 })
 
 test('THE SWEEP: with PANE_MARKS_MAX marks or fewer in the store a new mark reads and deletes nothing more; past that the expired and the unreadable marks of other conversations go — never a fresh one, never this conversation\'s, never a key that is no mark', { timeoutMs: 60_000 }, async ($, on) => {

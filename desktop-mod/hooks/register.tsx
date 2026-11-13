@@ -103,9 +103,11 @@
 //                   terminal, never a pane the person closed.
 //   session.end     stops the mirror (a roster emptied while the process dies
 //                   must not read as "the person closed the pane") and drops a
-//                   reopen still pending; on `clear` the process goes on under
-//                   a new conversation id, so the cached key is forgotten and
-//                   the next poll marks the new id. Observe: next(e) as is.
+//                   reopen still pending; on `clear` and `resume` the process
+//                   goes on under a new conversation id, so the cached key is
+//                   forgotten, the ended id is refused while the engine still
+//                   answers it, and the next poll under the new id marks it.
+//                   Observe: next(e) as is.
 //
 // Files over 4 MiB ($.fs.read's limit): scanIo hands the scanner three optional
 // closures built over $.process.run — head(path, lines), tail(path, bytes) and
@@ -155,7 +157,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import { I18N } from './i18n'
 import { liveAgentReturned, liveAged, liveSpawned, liveToolReturned, liveToolStarted, mergeLive, type LiveMap } from './live'
-import { BRAND, CLIENT_ALIVE_GAP_MS, CLIENT_RETRIES, CLIENT_RETRY_MAX_MS, CLIENT_RETRY_MS, COMMAND, DEFAULT_PREFS, DEFAULT_VIEW, DESKTOP, EMPTY_PAYLOAD, LOGO_ASSET, LOGO_MAX_CHARS, PANE_FORGET_TRIES, PANE_ID, PANE_MARKS_MAX, POLL_MS, REOPEN_DELAY_MS, STORE_PANE_PREFIX, STORE_PREFS_KEY, STORE_USAGE_TOAST_KEY, USAGE, type Agent, type Payload, type Prefs, type TheaterStatus } from './model'
+import { BRAND, CLIENT_ALIVE_GAP_MS, CLIENT_RETRIES, CLIENT_RETRY_MAX_MS, CLIENT_RETRY_MS, COMMAND, DEFAULT_PREFS, DEFAULT_VIEW, DESKTOP, EMPTY_PAYLOAD, LOGO_ASSET, LOGO_MAX_CHARS, PANE_ENDED_ASKS, PANE_FORGET_TRIES, PANE_ID, PANE_MARKS_MAX, POLL_MS, REOPEN_DELAY_MS, STORE_PANE_PREFIX, STORE_PREFS_KEY, STORE_USAGE_TOAST_KEY, USAGE, type Agent, type Payload, type Prefs, type TheaterStatus } from './model'
 import { cleanAgentText } from './office-chrome'
 import { cutWhy, nextOutage, noteCloses, officeLogKey, staleLogKeys, type OfficeLogBody, type Outage } from './office-log'
 import { isOfficeNote } from './office-props'
@@ -598,11 +600,14 @@ export async function poll($: EngineInterface): Promise<void> {
     // THE REOPEN's mirror (the block above ensurePolling): the pane first found shown → the mark; no longer listed → the mark
     // deleted. HERE, after the latch is released, and `void`: a $.store call takes a lock file and rewrites the whole store
     // file, on a machine whose trouble is starvation — awaited inside the latch, a slow one would leave the office empty
-    // exactly when it was opened (every later tick returns at `polling`), and one that never answered would freeze it for
-    // the life of the process. Both helpers never reject and set their flag before their first await, so the next poll does
-    // not ask twice.
+    // exactly when it was opened (every later tick returns at `polling`). Both helpers never reject and set their flag before
+    // their first await, so the next poll does not ask twice (`paneKeyOwed`: unless the conversation's id could not be read,
+    // which is asked again every poll — one cheap engine call, no store). WHAT THIS DOES NOT BUY (THE STORE'S QUEUE, above
+    // logOffice): the engine runs this plugin's store calls one after another, so a store read this poll awaits later (the
+    // roomDone reads above) still waits its turn behind a mark being written — milliseconds, or the lock's retries on a busy
+    // file — and a store call that never answered would hold those reads whether or not anything here awaited it.
     if (seen !== undefined && paneMemory) {
-      if (seen.shown && paneMarked !== true) void rememberPane($, seen.at)
+      if (seen.shown && (paneMarked !== true || paneKeyOwed)) void rememberPane($, seen.at)
       else if (!seen.listed && paneMarked === true) void forgetPane($)
     }
   }
@@ -640,6 +645,15 @@ let officeLogSeq = 0
  * A BY-PRODUCT: it never rejects and is always called with `void` — a store that is slow, full or locked loses that entry
  * and nothing else (the cards, the retry, the toast and the hook's answer never wait for it); a prune that fails leaves the
  * entry in place for the next write's prune.
+ * THE STORE'S QUEUE — what `void` does and does not buy. No hook of ours awaits a record or a mark write. But the engine
+ * (read in 2.1.321's code; its types do not promise it) runs ONE plugin's `$.store` calls one after another in each process,
+ * each `set` taking the store file's lock (shared with every open conversation's process) and rewriting the file. So the
+ * places that DO await the store — the poll's roomDone reads on a finish and on the first publish after an opening, the
+ * pane's first draw in a process (ui.tsx loadRoomDone) and a press that mirrors prefs or roomDone before it answers — wait
+ * their turn behind an entry or a mark still being written: milliseconds on a quiet file, up to the lock's retries (about a
+ * second per call) on a contended one. That is a bounded delay of a draw, not a fall: the page times no message, and a
+ * record write adds no render. A store call that never answered at all would hold those awaits with or without the record;
+ * the kit's store answers beneath the engine's queue, so no test here can show either.
  * Called as `void logOffice($, { k: 'fault', phase, why, retry }, now)`, `void logOffice($, { k: 'up', after, faults }, now)`,
  * `void logOffice($, { k: 'asked' })` and `void logOffice($, { k: 'reopen' })`.
  */
@@ -709,24 +723,55 @@ let demoKicked: boolean | undefined
 
 /** Whether this process keeps a mark at all: set by session.start (false under the terminal REPL), cleared by session.end. */
 let paneMemory = false
-/** This conversation's key (STORE_PANE_PREFIX + its id), asked at first need; undefined until then, and again after a /clear (session.end). */
+/** This conversation's key (STORE_PANE_PREFIX + its id), asked at first need; undefined until then, and again after a /clear or a resume (session.end). */
 let paneKey: string | undefined
+/**
+ * The id of the conversation a /clear or a resume just ended in this process (session.end), and how often the mirror was
+ * answered it since: `$.session.id()` goes on answering it until the engine's end step is over, and a key built from it
+ * then would be the WRONG conversation's for the rest of the process — the new one never marked, the ended one's mark
+ * rewritten and, at the close, deleted in its place. paneKeyOf refuses it PANE_ENDED_ASKS times (model.ts: why not for
+ * ever); undefined: no end is pending.
+ */
+let paneEndedId: string | undefined
+let paneEndedAsks = 0
 /**
  * What this process did with the mark: undefined — it never saw the pane shown (the reopen may still act); true — the mark
  * is written, or being written; false — the pane was closed and the mark deleted, or being deleted. Set BEFORE the first
  * await of rememberPane / forgetPane and asked again after it, so when an opening and a close overlap the last one wins.
  */
 let paneMarked: boolean | undefined
+/**
+ * `paneMarked` is true but the store was NOT asked, because the conversation's id could not be read (it rejected, answered
+ * nothing, or still answered the conversation that just ended): neither the write nor the delete was made, so the next poll
+ * asks for the key again — the write while the pane is shown, the delete while it is not listed. Without it an id that
+ * failed once at the wrong poll left a shown pane unmarked for the life of the process, or a closed one marked for ever.
+ * It costs one `$.session.id()` per poll while it lasts and no store call, so it is not counted against PANE_FORGET_TRIES.
+ */
+let paneKeyOwed = false
 /** The deletes of the mark the store refused since the last opening (forgetPane: PANE_FORGET_TRIES). */
 let paneForgetTries = 0
 /** THE REOPEN's one pending timer (session.start arms it, session.end and the next session.start drop it). */
 let reopenTimer: Timer | undefined
 
-/** This conversation's mark key, or undefined while its id cannot be read (asked again at the next need). Never rejects. */
+/**
+ * This conversation's mark key, or undefined while its id cannot be read — or still is the id of the conversation that
+ * just ended here (`paneEndedId`: compared AFTER the await, so an ask already in flight when the /clear came is refused
+ * too). Nothing is cached then: the callers leave `paneKeyOwed` and the next poll asks again. Never rejects.
+ */
 async function paneKeyOf($: EngineInterface): Promise<string | undefined> {
   if (paneKey !== undefined) return paneKey
   const id = await $.session.id().catch(() => '')
-  if (id !== '') paneKey ??= STORE_PANE_PREFIX + id
+  if (paneKey !== undefined) return paneKey
+  if (id === '') return undefined
+  if (id === paneEndedId) {
+    if (paneEndedAsks < PANE_ENDED_ASKS) {
+      paneEndedAsks++
+      return undefined
+    }
+    // (asked often enough: the engine kept the id, so it is this conversation's after all)
+  }
+  paneEndedId = undefined
+  paneKey = STORE_PANE_PREFIX + id
   return paneKey
 }
 
@@ -734,18 +779,25 @@ async function paneKeyOf($: EngineInterface): Promise<string | undefined> {
  * The pane is shown (or was just opened again): this conversation's mark, `{ at: now }` — ONE $.store write per process and
  * opening (`paneMarked`: a pane raised, retitled or polled again writes nothing). A write the store refuses (over its size,
  * the lock not won) is not tried again in this process: a retry every poll would hammer a store already in trouble, and
- * the only loss is that this conversation's pane does not come back once. A pane closed while the write was still pending
+ * the only loss is that this conversation's pane does not come back once. A conversation id that cannot be read is another
+ * matter — the store was never asked — so the write stays owed (`paneKeyOwed`) and the next poll that finds the pane shown
+ * asks again. A pane closed while the write was still pending
  * is deleted again after it (the late write must not leave the mark of a closed pane). Then THE SWEEP (pane-mark.ts
  * paneMarksToDrop), only here, right after a mark was written: one key listing, and only past PANE_MARKS_MAX marks a read
  * of each and the deletes of the dead ones. Never rejects; always called with `void` by the poll.
  */
 async function rememberPane($: EngineInterface, now: number): Promise<void> {
-  if (!paneMemory || paneMarked === true) return
+  if (!paneMemory || (paneMarked === true && !paneKeyOwed)) return
   paneMarked = true
+  paneKeyOwed = false
   paneForgetTries = 0
   try {
     const key = await paneKeyOf($)
-    if (key === undefined || paneMarked !== true) return
+    if (paneMarked !== true) return
+    if (key === undefined) {
+      paneKeyOwed = true
+      return
+    }
     await $.store.set(key, { at: now })
     if (paneMarked !== true) {
       // (closed meanwhile: forgetPane's delete may have run before this write landed. After a /clear — undefined — the key
@@ -767,15 +819,24 @@ async function rememberPane($: EngineInterface, now: number): Promise<void> {
  * The pane is no longer listed — the person closed it: this conversation's mark is deleted, so no later process opens it.
  * A delete the store refused must not leave that mark (the one outcome THE REOPEN may never have is a closed pane coming
  * back): the flag goes back to "written" and the next poll tries again, PANE_FORGET_TRIES times in all for one close, so a
- * broken store is not asked every POLL_MS for ever. A pane opened again while the delete was still to be made keeps its
- * mark (the flag is asked again after the await). Never rejects; always called with `void` by the poll.
+ * broken store is not asked every POLL_MS for ever. A conversation id that cannot be read made no store call at all: the
+ * delete stays owed (`paneKeyOwed`, the flag back to "written") and every poll that still finds no pane listed asks again,
+ * uncounted, until the id is readable — the mark an EARLIER process of this conversation wrote is the one at stake. A pane
+ * opened again while the delete was still to be made keeps its mark (the flag is asked again after the await). Never
+ * rejects; always called with `void` by the poll.
  */
 async function forgetPane($: EngineInterface): Promise<void> {
   if (!paneMemory || paneMarked !== true) return
   paneMarked = false
+  paneKeyOwed = false
   try {
     const key = await paneKeyOf($)
-    if (key === undefined || paneMarked !== false) return
+    if (paneMarked !== false) return
+    if (key === undefined) {
+      paneMarked = true
+      paneKeyOwed = true
+      return
+    }
     await $.store.delete(key)
     paneForgetTries = 0
   } catch {
@@ -1040,21 +1101,27 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // THE REOPEN's guard at the session's end. Any end but a /clear means this process is going away (an exit, a signal, a
-  // logout, another conversation resumed in its place): the mirror stops and a reopen still pending is dropped — if the
-  // engine empties its pane roster on the way down while the poll still runs, that must not read as "the person closed the
-  // pane" and delete the mark (not seen in the engine's code, and not verifiable in the kit: this is the insurance; where
-  // the app kills the process outright the hook never runs and nothing is lost by it). A /clear is the other case
-  // (SessionEndInput): the conversation ends, the SAME process goes on under a NEW id with the pane still up, and no
-  // session.start follows — so the cached key and the flag are forgotten and the next poll marks the new id (one write);
-  // the cleared conversation's own mark is left where it is. Nothing is awaited: the whole chain shares the exit's one
-  // short bound. Observe: next(e) as is.
+  // THE REOPEN's guard at the session's end. An exit, a signal or a logout means this process is going away: the mirror
+  // stops and a reopen still pending is dropped — if the engine empties its pane roster on the way down while the poll
+  // still runs, that must not read as "the person closed the pane" and delete the mark (not seen in the engine's code, and
+  // not verifiable in the kit: this is the insurance; where the app kills the process outright the hook never runs and
+  // nothing is lost by it). A /clear and a resume are the other case (SessionEndInput: "after a `/clear` or a resume the
+  // process goes on under another" id): the conversation ends, the SAME process goes on under a NEW id with the pane still
+  // up, and no session.start follows — so the cached key and the flag are forgotten and the next poll marks the new id (one
+  // write); the ended conversation's own mark is left where it is. With the flag forgotten nothing can be deleted until a
+  // pane was seen shown again, so a resume that ends the process after all loses no mark either. THE ENDED ID is kept
+  // (`paneEndedId`): `$.session.id()` answers it until this end step is over, and a poll in that gap — or one already in
+  // flight — must not cache its key as the new conversation's (paneKeyOf). Nothing is awaited: the whole chain shares the
+  // exit's one short bound. Observe: next(e) as is.
   on('session.end', async ($, e, next) => {
     try {
-      if (e.reason === 'clear') {
+      if (e.reason === 'clear' || e.reason === 'resume') {
         paneKey = undefined
         paneMarked = undefined
+        paneKeyOwed = false
         paneForgetTries = 0
+        paneEndedId = e.sessionId === '' ? undefined : e.sessionId
+        paneEndedAsks = 0
       } else {
         paneMemory = false
         reopenTimer?.cancel()
@@ -1314,7 +1381,13 @@ export const register: Register = on => {
   // the instance that then faulted (the cards show) must not close the outage with a false recovery of a few ms — the
   // kit cannot stage that order (it refuses a post while the drawing holds no Client), so the rule is tested pure. The
   // page holds the Client's next post until this hook answers, so the hook awaits one clock read at most and NEVER the
-  // store.
+  // store. (The `up` write it starts is still ahead, in the engine's per-plugin store queue, of the store write a press
+  // right after a recovery awaits before it answers: that press is answered a store write later — THE STORE'S QUEUE, above
+  // logOffice.) NOT PINNED BY A TEST, and why: a note passed on to ui.tsx's hook would be answered `{}` there too, and a
+  // press whose answer it made "no longer the newest" is drawn by the redraw that follows the press's own write — measured
+  // in the kit with this `return {}` turned into `next(e)`: the same drawing, the same writes, the same count of renders
+  // (office-buttons.test.ts A MOUNT NOTE WHILE A PRESS IS STILL APPLYING passes either way). The order of registration is
+  // all that keeps the note off those counters.
   on('ui.message', { element: 'office' }, async ($, e, next) => { // OFFICE_KEY, as a literal: validate reads a matcher statically
     if (!isOfficeNote(e.data)) return next(e)
     try {
