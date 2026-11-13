@@ -24,6 +24,21 @@ function-hooks API, which may change between releases.
 
 ## [Unreleased]
 
+### Added
+
+- **A small permanent record of the desktop office's falls and recoveries.**
+  When the office falls back to the text cards, and when it draws again, the mod
+  now notes it in its own local storage: the time, the conversation's id, the
+  stage at which the app gave up and its one-line reason, and which automatic
+  retry followed — a note when `/theater` was run while the cards showed, and
+  one line when the pane was opened again after a restart.
+  It is there for diagnosing the next wave of faults, which never happen in the
+  tests and whose trace in the app's logs is gone within days. It holds no
+  conversation text, keeps the newest 100 entries (about 30 KB) and is written
+  beside the office's work, never awaited by it; a session with no fall adds
+  nothing to the record, except that one line after a restart. Nothing changed
+  in what the office draws; README and SECURITY now say what the mod writes.
+
 ### Removed
 
 - **The Python app and its browser UI.** `claude_theater.py` — the single-file
@@ -55,8 +70,8 @@ PyPI (`pip install claude-theater==0.4.0`) and the latest GitHub release, with i
 
 - **The desktop office no longer stays on the text cards for the rest of a
   conversation.** The office Client faults while the app's page is starved —
-  the app's own memory-pressure and stall warnings sit beside 72 of the 85
-  faults it logged in three weeks — at every stage the surface times (the
+  83% of the 93 faults the app logged sit within three minutes of one of its
+  memory-pressure warnings, against 36% of the time it was running — at every stage the surface times (the
   frame's shell, its runtime, the module's load, a render past two seconds),
   and in waves that the old two retries, three seconds apart, never outlasted.
   The Client is now tried again with a growing gap (3, 6, 12, 24, 48, then 60
@@ -64,6 +79,38 @@ PyPI (`pip install claude-theater==0.4.0`) and the latest GitHub release, with i
   while and faulted again starts a wave anew; a subagent starting, or the pane
   being opened, with the wave spent tries it at once; `/theater` still brings
   it back at once. Nothing changed in what the office draws.
+- **A resting desktop office hands its Client nothing new.** The office
+  Client's props carried a minute clock that nothing drawn read, so every turn
+  of the minute sent the Client new props — one more render the desktop page
+  times at two seconds, sixty an hour in an office where nothing moved. The
+  clock is gone from the props: they change only when the drawn office does (an
+  agent arriving or finishing, its activity, the ⏱ flag, the open drawer's
+  minutes, a new five-hour reading). The pane is still redrawn once a minute
+  while an agent's minute turns; the gain rests on the desktop page sending the
+  Client only props that differ. Nothing changed in what the office draws.
+- **The theater pane comes back after the app restarted the conversation.** The
+  desktop app ends a conversation's engine process when the conversation sat
+  idle while memory is short, and when the app itself restarts, and starts a
+  new one when you return; the pane belonged to the old process, so the theater
+  was gone until the next subagent or a `/theater`. The mod now notes, in its
+  own local storage, which conversations have the pane open (the conversation's
+  id and a time, nothing else; the note is deleted when you close the pane and
+  ignored after 30 days), and the new process opens the pane again about half a
+  minute after it starts — quietly: no message, no sound, no focus taken, and
+  no toast if the office falls back to the text cards right then (the cards and
+  the automatic retries are as before). A pane you closed stays closed, and if
+  you close it after it came back, the first subagent does not open it again in
+  that process: the button above the prompt and `/theater` do. Desktop only;
+  the terminal is unchanged.
+- **The pane's note keeps to the right conversation.** Found in review of the
+  change above, before any release: after a `/clear`, or when another
+  conversation was resumed in the same process, the note could be written and
+  later deleted under the conversation that had just ended, so the new one's
+  pane did not come back after a restart; and when the engine could not give
+  the conversation's id at the moment the pane was first seen or was closed,
+  the note was never written — or, worse, never deleted, and a pane you had
+  closed could come back. The mod now waits for the new conversation's id,
+  and asks again at the next five-second check until it has one.
 
 ## [0.5.0] - 2026-10-23
 

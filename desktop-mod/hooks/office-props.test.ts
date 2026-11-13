@@ -62,7 +62,7 @@ test('buildOfficeProps: slim, JSON-clean, task/result only in the drawer', () =>
   assertJson(p)
   expect(JSON.parse(JSON.stringify(p))).toEqual(p) // plain JSON: the round trip loses nothing
   expect(p.v).toBe(1)
-  expect(p.nowMin).toBe(T0)
+  expect('nowMin' in p).toBe(false) // no clock rides the props: a field nothing draws would hand the Client new props every minute
   expect(p.empty).toBeNull()
   expect(p.counts).toEqual({ run: 1, idle: 0, done: 1 })
   expect(p.rooms).toHaveLength(1)

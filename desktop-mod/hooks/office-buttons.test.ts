@@ -611,6 +611,28 @@ test('THE NEWEST ANSWER: a slower post answering after a newer one never draws o
   await ui.unmount()
 })
 
+test('A MOUNT NOTE WHILE A PRESS IS STILL APPLYING (register.tsx answers the note; the more line\'s $.store write is held meanwhile): once the write lands the module draws the room\'s hide line, and the note wrote nothing — no $.state key, no other $.store key', { timeoutMs: 30_000 }, async ($, on) => {
+  // (what this does NOT pin: that the note stays off ui.tsx's NEWEST ANSWER counters. A press whose answer is dropped as
+  // "not the newest" is drawn by the redraw after its own write, so the drawing, the writes and the renders are the same
+  // either way — register.tsx, the note hook's comment)
+  const { ui, captured } = await demoAt($, on, 1)
+  const writes = JSON.stringify(captured.writes)
+  const stored = { ...captured.storeWrites }
+  const release = hold(captured, 'roomDone')
+  const more = clickMore(ui, S2)
+  expect(await until(() => captured.seq.includes('held:roomDone'))).toBe(true)
+  await ui.post({ t: 'mounted' }, { in: OFFICE_KEY })
+  await until(() => false, 20)
+  release()
+  await more
+  await until(() => false, 20)
+  expect(await moreLabelOf(ui, S2), 'the room\'s hide line drawn').toBe(HIDE)
+  expect(roomOf(await officeProps(ui), S2).showDone).toBe(true)
+  expect(JSON.stringify(captured.writes)).toBe(writes)
+  expect(captured.storeWrites).toEqual({ ...stored, roomDone: (stored.roomDone ?? 0) + 1 })
+  await ui.unmount()
+})
+
 test('THE NEWEST ANSWER: mute (its prefs $.store mirror held), then the settings — once the held write lands the module draws the settings popover and 🔕 (the mute answer, read before the settings opened, once closed the popover the person had just opened)', { timeoutMs: 30_000 }, async ($, on) => {
   const { ui, captured } = await demoAt($, on, 1)
   const release = hold(captured, 'prefs')

@@ -43,10 +43,10 @@ test('usageBar: clamps below zero, rounds to the nearest cell, honours the cell 
 
 test('usageLabel: percent, local reset time, ⚠ from 80%', () => {
   const u = { pct: 42.4, resetsAt: '2026-10-10T11:30:00Z' }
-  const label = usageLabel(u, 'he', Date.UTC(2026, 9, 10, 9, 0))
+  const label = usageLabel(u, 'he')
   expect(label.startsWith('⏳ 5h ▰▰▰▰▱▱▱▱▱▱ 42% · ')).toBe(true)
   expect(label).toMatch(/\d\d:\d\d$/)
-  expect(usageLabel({ pct: 81, resetsAt: '' }, 'en', 0)).toBe('⚠ 5h ▰▰▰▰▰▰▰▰▱▱ 81%')
+  expect(usageLabel({ pct: 81, resetsAt: '' }, 'en')).toBe('⚠ 5h ▰▰▰▰▰▰▰▰▱▱ 81%')
 })
 
 test('usageLabel: the reset hour is the machine local HH:MM, zero-padded', () => {
@@ -54,28 +54,28 @@ test('usageLabel: the reset hour is the machine local HH:MM, zero-padded', () =>
   const iso = '2026-10-10T11:30:00Z'
   const d = new Date(iso)
   const local = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  expect(usageLabel({ pct: 42.4, resetsAt: iso }, 'en', 0)).toBe(`⏳ 5h ▰▰▰▰▱▱▱▱▱▱ 42% · ${local}`)
+  expect(usageLabel({ pct: 42.4, resetsAt: iso }, 'en')).toBe(`⏳ 5h ▰▰▰▰▱▱▱▱▱▱ 42% · ${local}`)
   // A reset built at a local wall-clock time reads back as exactly that time.
-  expect(usageLabel({ pct: 10, resetsAt: new Date(2026, 9, 10, 14, 30).toISOString() }, 'en', 0)).toBe('⏳ 5h ▰▱▱▱▱▱▱▱▱▱ 10% · 14:30')
-  expect(usageLabel({ pct: 10, resetsAt: new Date(2026, 9, 10, 9, 5).toISOString() }, 'he', 0)).toBe('⏳ 5h ▰▱▱▱▱▱▱▱▱▱ 10% · 09:05')
+  expect(usageLabel({ pct: 10, resetsAt: new Date(2026, 9, 10, 14, 30).toISOString() }, 'en')).toBe('⏳ 5h ▰▱▱▱▱▱▱▱▱▱ 10% · 14:30')
+  expect(usageLabel({ pct: 10, resetsAt: new Date(2026, 9, 10, 9, 5).toISOString() }, 'he')).toBe('⏳ 5h ▰▱▱▱▱▱▱▱▱▱ 10% · 09:05')
 })
 
 test('usageLabel: ⚠ switches on at 80 after rounding, not before', () => {
-  expect(usageLabel({ pct: 79.4, resetsAt: '' }, 'en', 0)).toBe('⏳ 5h ▰▰▰▰▰▰▰▰▱▱ 79%')
-  expect(usageLabel({ pct: 79.6, resetsAt: '' }, 'en', 0)).toBe('⚠ 5h ▰▰▰▰▰▰▰▰▱▱ 80%')
-  expect(usageLabel({ pct: 80, resetsAt: '' }, 'he', 0)).toBe('⚠ 5h ▰▰▰▰▰▰▰▰▱▱ 80%')
-  expect(usageLabel({ pct: 0, resetsAt: '' }, 'he', 0)).toBe('⏳ 5h ▱▱▱▱▱▱▱▱▱▱ 0%')
+  expect(usageLabel({ pct: 79.4, resetsAt: '' }, 'en')).toBe('⏳ 5h ▰▰▰▰▰▰▰▰▱▱ 79%')
+  expect(usageLabel({ pct: 79.6, resetsAt: '' }, 'en')).toBe('⚠ 5h ▰▰▰▰▰▰▰▰▱▱ 80%')
+  expect(usageLabel({ pct: 80, resetsAt: '' }, 'he')).toBe('⚠ 5h ▰▰▰▰▰▰▰▰▱▱ 80%')
+  expect(usageLabel({ pct: 0, resetsAt: '' }, 'he')).toBe('⏳ 5h ▱▱▱▱▱▱▱▱▱▱ 0%')
 })
 
 test('usageLabel: an empty or unparsable reset time leaves the label without the clock part', () => {
-  expect(usageLabel({ pct: 30, resetsAt: '' }, 'en', 0)).toBe('⏳ 5h ▰▰▰▱▱▱▱▱▱▱ 30%')
-  expect(usageLabel({ pct: 30, resetsAt: 'soon' }, 'en', 0)).toBe('⏳ 5h ▰▰▰▱▱▱▱▱▱▱ 30%')
+  expect(usageLabel({ pct: 30, resetsAt: '' }, 'en')).toBe('⏳ 5h ▰▰▰▱▱▱▱▱▱▱ 30%')
+  expect(usageLabel({ pct: 30, resetsAt: 'soon' }, 'en')).toBe('⏳ 5h ▰▰▰▱▱▱▱▱▱▱ 30%')
 })
 
 test('usageLabel: one short line — no newline, no bidi controls, same text in both languages', () => {
   const u = { pct: 88.8, resetsAt: new Date(2026, 9, 10, 23, 59).toISOString() }
-  const he = usageLabel(u, 'he', 0)
-  const en = usageLabel(u, 'en', 0)
+  const he = usageLabel(u, 'he')
+  const en = usageLabel(u, 'en')
   expect(he).toBe(en)
   expect(he).not.toMatch(/[\r\n\u200e\u200f\u202a-\u202e\u2066-\u2069\u061c]/)
   expect(he.length).toBeLessThanOrEqual(32)
@@ -92,8 +92,8 @@ test('usageShort: the label without the bar and the clock — `⏳ 5h 42%`, ⚠ 
   for (const pct of [0, 12.5, 42.4, 79.6, 100]) {
     const u = { pct, resetsAt: R }
     const short = usageShort(u)
-    expect(usageLabel(u, 'en', 0).startsWith(short.slice(0, 4))).toBe(true)
-    expect(usageLabel(u, 'en', 0)).toContain(short.slice(5))
+    expect(usageLabel(u, 'en').startsWith(short.slice(0, 4))).toBe(true)
+    expect(usageLabel(u, 'en')).toContain(short.slice(5))
   }
   expect(usageShort({ pct: 88.8, resetsAt: R })).not.toMatch(/[\r\n\u200e\u200f\u202a-\u202e\u2066-\u2069\u061c]/)
 })
@@ -111,8 +111,8 @@ test('sameFiveHour: what is drawn — the rounded percent and the window; null e
   expect(sameFiveHour({ pct: 42, resetsAt: R }, { pct: 43, resetsAt: R })).toBe(false)
   expect(sameFiveHour({ pct: 42, resetsAt: R }, { pct: 42, resetsAt: '2026-10-10T16:30:00Z' })).toBe(false)
   // ... because the label is a function of exactly that: the same rounded percent draws the same bar too
-  expect(usageLabel({ pct: 44.6, resetsAt: R }, 'he', 0)).toBe(usageLabel({ pct: 45, resetsAt: R }, 'he', 0))
-  expect(usageLabel({ pct: 44.6, resetsAt: '' }, 'en', 0)).toBe('⏳ 5h ▰▰▰▰▰▱▱▱▱▱ 45%')
+  expect(usageLabel({ pct: 44.6, resetsAt: R }, 'he')).toBe(usageLabel({ pct: 45, resetsAt: R }, 'he'))
+  expect(usageLabel({ pct: 44.6, resetsAt: '' }, 'en')).toBe('⏳ 5h ▰▰▰▰▰▱▱▱▱▱ 45%')
 })
 
 test('usageThreshold: 95, 80 or 0 on the rounded percent', () => {
@@ -206,7 +206,7 @@ test('session.measure: the footer line ($.ui.status) is the five-hour label, and
   const i0 = seen.invalidates
   await measure($, limits(42, R))
   expect(seen.statuses.slice(s0)).toEqual(['⏳ 5h ▰▰▰▰▱▱▱▱▱▱ 42% · 13:20'])
-  expect(seen.statuses.at(-1)).toBe(usageLabel({ pct: 42, resetsAt: R }, 'he', 0))
+  expect(seen.statuses.at(-1)).toBe(usageLabel({ pct: 42, resetsAt: R }, 'he'))
   expect(seen.invalidates - i0).toBe(1)
   expect(await usageProp(ui)).toEqual({ pct: 42, resetsAt: R })
   // the window moved: a new line, a new redraw (⚠ from 80)
@@ -441,7 +441,7 @@ test('desktop header: the Client gets the reading; a wide pane draws the full la
   expect(await officeMeter(wide)).toBe('')
   await measure($, limits(42, R))
   expect((await usageProp(wide))?.pct).toBe(42)
-  const label = usageLabel({ pct: 42, resetsAt: R }, 'he', 0)
+  const label = usageLabel({ pct: 42, resetsAt: R }, 'he')
   expect(label).toBe('⏳ 5h ▰▰▰▰▱▱▱▱▱▱ 42% · 15:45')
   expect(await officeMeter(wide)).toBe(label)   // the meter a dim Text of its own at the other edge
   expect(await officeHeader(wide)).toBe('🎭 עובדים 0 · סיימו 0')

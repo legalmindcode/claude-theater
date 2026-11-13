@@ -24,8 +24,8 @@ interleaved JSON. Claude Theater turns it into a glance — who's working, who's
 stuck, who just finished — without reading a single log line.
 
 **Safe by design:** it runs entirely on your machine. It only *reads* your local
-Claude Code transcripts, writes nothing outside its own settings, makes no network
-calls and sends no telemetry. ([more](#privacy))
+Claude Code transcripts, writes only its own settings and a small local record
+of its own, makes no network calls and sends no telemetry. ([more](#privacy))
 
 Want to look around without a single real subagent? Once installed, ⚙️ → *Demo*
 (or `d`) fills the office with synthetic agents.
@@ -102,7 +102,11 @@ keep them on your machine:
   (`~/.claude/projects`, plus the open-conversations registry in
   `~/.claude/sessions`); the only files of its own it touches are its small logo
   and its finish chime, which ship in the mod's folder.
-- **Writes nothing** outside its own settings (language, sound, pins).
+- **Writes only its own small notes**, in the mod's own storage on your machine:
+  your settings (language, sound, pins), a short record of the times the office
+  display fell back and recovered (the time, the conversation's id and the
+  app's one-line reason — never any conversation text), and which conversations
+  had the pane open.
 - **Never transmits** anything anywhere — no network calls, no telemetry.
 - **No server, no port.** The pane is drawn inside your Claude Code session;
   nothing listens on your machine.

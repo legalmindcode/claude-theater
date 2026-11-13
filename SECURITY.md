@@ -11,8 +11,11 @@ product, so this policy doubles as a short statement of how it protects you.
   (`~/.claude/projects`, plus the open-conversations registry in
   `~/.claude/sessions`); it never modifies them and never starts, stops, or
   talks to your agents. The only files of its own it touches are its small logo
-  and its finish chime; it writes nothing outside its own settings (language,
-  sound, pins).
+  and its finish chime; it writes only its own small notes, in the mod's own
+  storage on your machine: your settings (language, sound, pins), a short record
+  of the times the office display fell back and recovered (the time, the
+  conversation's id and the app's one-line reason — never any conversation
+  text), and which conversations had the pane open.
 - **Nothing leaves your machine.** No telemetry, no analytics, no outbound
   network calls. Your conversations and code stay on your computer.
 - **No third-party runtime dependencies.** A handful of TypeScript modules over
