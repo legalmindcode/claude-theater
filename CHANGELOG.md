@@ -70,8 +70,8 @@ PyPI (`pip install claude-theater==0.4.0`) and the latest GitHub release, with i
 
 - **The desktop office no longer stays on the text cards for the rest of a
   conversation.** The office Client faults while the app's page is starved —
-  the app's own memory-pressure and stall warnings sit beside 72 of the 85
-  faults it logged in three weeks — at every stage the surface times (the
+  83% of the 93 faults the app logged sit within three minutes of one of its
+  memory-pressure warnings, against 36% of the time it was running — at every stage the surface times (the
   frame's shell, its runtime, the module's load, a render past two seconds),
   and in waves that the old two retries, three seconds apart, never outlasted.
   The Client is now tried again with a growing gap (3, 6, 12, 24, 48, then 60
