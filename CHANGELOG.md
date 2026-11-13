@@ -87,6 +87,20 @@ PyPI (`pip install claude-theater==0.4.0`) and the latest GitHub release, with i
   minutes, a new five-hour reading). The pane is still redrawn once a minute
   while an agent's minute turns; the gain rests on the desktop page sending the
   Client only props that differ. Nothing changed in what the office draws.
+- **The theater pane comes back after the app restarted the conversation.** The
+  desktop app ends a conversation's engine process when the conversation sat
+  idle while memory is short, and when the app itself restarts, and starts a
+  new one when you return; the pane belonged to the old process, so the theater
+  was gone until the next subagent or a `/theater`. The mod now notes, in its
+  own local storage, which conversations have the pane open (the conversation's
+  id and a time, nothing else; the note is deleted when you close the pane and
+  ignored after 30 days), and the new process opens the pane again about half a
+  minute after it starts — quietly: no message, no sound, no focus taken, and
+  no toast if the office falls back to the text cards right then (the cards and
+  the automatic retries are as before). A pane you closed stays closed, and if
+  you close it after it came back, the first subagent does not open it again in
+  that process: the button above the prompt and `/theater` do. Desktop only;
+  the terminal is unchanged.
 
 ## [0.5.0] - 2026-10-23
 

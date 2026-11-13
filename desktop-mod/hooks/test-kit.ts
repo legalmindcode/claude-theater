@@ -17,7 +17,15 @@
 // never the file on disk: the tests stay hermetic. Two switches make a call
 // reject beneath, for THE RECORD's tests (register.test.ts): `sessionIdDown`
 // ($.session.id) and `storeKeysDown` ($.store.keys); a store write that is
-// refused is a `hold` on its key whose promise rejects.
+// refused is a `hold` on its key whose promise rejects. And for THE REOPEN's
+// tests (reopen.test.ts) the pane roster can be told apart as the engine tells
+// it: listed and shown (the default), listed but shown by nothing
+// (`paneShown` false), not listed (`paneOpen` false: closed) or unanswerable
+// (`panesDown`); an opening that is placed lists the pane from then on, as the
+// engine's roster does; `openAnswer` makes an opening wait unplaced or reject;
+// `storeDeleteFails` makes the next deletes reject; `sessionId` is the id
+// $.session.id answers (a /clear changes it); and a bottom `session.end` hook
+// answers what core would, so a test can raise the session's end.
 
 import type { On } from 'claude-code'
 import { mock } from 'claude-code/testing'
@@ -51,6 +59,12 @@ export function beneath(on: On, current: () => Agent[], store: Record<string, un
     writes: { payload: 0, scanError: 0, view: 0, tick: 0, prefs: 0 } as Writes,
     /** $.store writes seen beneath the plugin, by key (the housekeeping's budget: the prefs mirror, roomDone). */
     storeWrites: {} as Record<string, number>,
+    /** $.store deletes that LANDED beneath the plugin, by key (they stay out of `storeWrites` and `seq`: a delete redraws nothing and no budget counts it). */
+    storeDeletes: {} as Record<string, number>,
+    /** $.store deletes the plugin ASKED for, by key: the landed ones and the rejected ones. */
+    storeDeleteTries: {} as Record<string, number>,
+    /** The next this-many $.store.delete calls reject beneath (a lock not won): the key stays. */
+    storeDeleteFails: 0,
     /** $.fs.write calls seen beneath the plugin: none is expected (the mod writes no file: THE RECORD of the office's falls is `$.store` keys, register.tsx). */
     fsWrites: 0,
     /**
@@ -74,8 +88,21 @@ export function beneath(on: On, current: () => Agent[], store: Record<string, un
     envDown: false,
     /** Non-null → every `view` the plugin reads carries this `selected` (what $.state kept over a hot reload, which this harness cannot replay). */
     selectedBeneath: null as string | null,
-    /** False → $.ui.panes lists no pane: the person closed it. */
+    /** False → $.ui.panes lists no pane: the person closed it. An opening the host takes sets it true: an opened pane is listed from then on, as in the engine's roster. */
     paneOpen: true,
+    /** False → the pane, while listed, is shown by nothing (`isShown` and `isPlaced` false): no page attached yet, a `-p` run. */
+    paneShown: true,
+    /** True → $.ui.panes rejects beneath: a listing that cannot be read (neither "open" nor "closed"). */
+    panesDown: false,
+    /**
+     * What $.ui.open answers: `placed` (the default); `refused` — `{ isPlaced: false, reason }` from a host that keeps no such
+     * pane (the roster does not list it); `down` — the call rejects (a hook that throws is skipped, and nothing answers under it).
+     */
+    openAnswer: 'placed' as 'placed' | 'refused' | 'down',
+    /** The arguments of every $.ui.open the plugin made, in order (THE REOPEN asks for no `focus`). */
+    openArgs: [] as Array<Record<string, unknown>>,
+    /** The id $.session.id answers (a /clear goes on under a new one). */
+    sessionId: 'test-session',
     /** Non-null → run once at the next scan's first step (its $.env.get of HOME): what the person does while a scan runs. */
     onScan: null as (() => void) | null,
     /** True → $.agent.list answers no list at all: the poll's ageing of the live map (a step past the scan, the poll's alone) throws. */
@@ -113,7 +140,16 @@ export function beneath(on: On, current: () => Agent[], store: Record<string, un
     const h = held(e.key)
     return h ? h.then(land) : land()
   })
-  on('store.delete', ($, e) => { delete captured.store[e.key]; return { value: undefined } })
+  on('store.delete', ($, e) => {
+    captured.storeDeleteTries[e.key] = (captured.storeDeleteTries[e.key] ?? 0) + 1
+    if (captured.storeDeleteFails > 0) {
+      captured.storeDeleteFails -= 1
+      throw new Error('store delete down')
+    }
+    delete captured.store[e.key]
+    captured.storeDeletes[e.key] = (captured.storeDeletes[e.key] ?? 0) + 1
+    return { value: undefined }
+  })
   on('store.keys', () => {
     if (captured.storeKeysDown) throw new Error('store keys down')
     return { value: Object.keys(captured.store) }
@@ -130,9 +166,11 @@ export function beneath(on: On, current: () => Agent[], store: Record<string, un
     return { value: env[e.name] }
   })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
+  // (nothing beneath the plugins answers session.end in a test: this is core's echo)
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }))
   on('session.id', () => {
     if (captured.sessionIdDown) throw new Error('session id down')
-    return { value: 'test-session' }
+    return { value: captured.sessionId }
   })
   // nothing beneath the plugins answers command.register: without this the plugin's
   // session.start would abort before starting the poll
@@ -198,9 +236,22 @@ export function beneath(on: On, current: () => Agent[], store: Record<string, un
   on('fs.write', ($, e, next) => { captured.fsWrites += 1; return next(e) })
   on('ui.toast', ($, e) => { captured.toasts.push(e.text); captured.toastTimeouts.push(e.timeoutMs); return { value: undefined } })
   on('audio.play', () => { captured.plays += 1; return { value: undefined } })
-  on('ui.open', ($, e) => { captured.opens.push(e.title ?? e.id); captured.seq.push('open'); return { value: { isPlaced: true as const } } })
-  // the pane is up: the poll scans only while $.ui.panes() lists it shown (PAGE polled only while visible); `paneOpen` false: closed
-  on('ui.panes', () => ({ value: captured.paneOpen ? [{ id: 'agent-theater', title: 'T', isShown: true, isFocused: false, isPlaced: true }] : [] }))
+  on('ui.open', ($, e) => {
+    if (captured.openAnswer === 'down') throw new Error('ui open down')
+    captured.opens.push(e.title ?? e.id)
+    captured.openArgs.push({ ...e })
+    captured.seq.push('open')
+    if (captured.openAnswer === 'refused') return { value: { isPlaced: false as const, reason: 'a host that places no pane' } }
+    captured.paneOpen = true
+    return { value: { isPlaced: true as const } }
+  })
+  // the pane is up: the poll scans only while $.ui.panes() lists it shown (PAGE polled only while visible); `paneOpen` false:
+  // closed; `paneShown` false: listed, shown by nothing; `panesDown`: no answer at all
+  on('ui.panes', () => {
+    if (captured.panesDown) throw new Error('ui panes down')
+    const shown = captured.paneShown
+    return { value: captured.paneOpen ? [{ id: 'agent-theater', title: 'T', isShown: shown, isFocused: false, isPlaced: shown }] : [] }
+  })
   on('ui.focus', () => ({}))
   // the poll's payload write becomes the fixture of the moment (unless the scanner reads `files`: then it is kept; and a
   // demo publish is kept whole, so leaving the demo is drawn from the demo cast state really holds)

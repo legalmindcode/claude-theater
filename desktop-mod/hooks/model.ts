@@ -187,6 +187,44 @@ export const STORE_PREFS_KEY = 'prefs'
  * `resetsAt` is never '' here: a window reported without a reset time is never toasted.
  */
 export const STORE_USAGE_TOAST_KEY = 'usageToast'
+/**
+ * THE REOPEN (pane-mark.ts; register.tsx rememberPane / forgetPane / reopenPane): every $.store key that starts with this
+ * is one conversation's PANE MARK — the prefix and the conversation's id, value `{ at }` — "this conversation's pane was
+ * open and nobody closed it". ONE KEY PER CONVERSATION, never one shared map: every open conversation runs its own engine
+ * process and all of them share the mod's one store file; the engine (2.1.321) locks that file around each single `set` or
+ * `delete` — lock, read afresh, merge the ONE key, rewrite — but not around a plugin's get-then-set, so a map read and
+ * written back by the mod could bring back an entry another conversation had just deleted, and a pane the person closed
+ * would be opened again. (THE RECORD's keys start with `office-log:`, office-log.ts; nothing else starts with either.)
+ */
+export const STORE_PANE_PREFIX = 'pane:'
+/**
+ * How long after session.start a new process waits before it opens the pane again. The engine raises session.start as
+ * soon as the hooks modules are loaded, at the very start of its own start-up: the app's timing lines put the rest of that
+ * start-up at a median of 12 s over 53 days of logs and 22 s in November, and the office frame must load within 10 s, so an
+ * opening at session.start would put the whole load inside the busiest seconds of the process — and a frame that misses its
+ * limit is a fall. At 30 s the start-up was over in 85% of the starts (67% in November). NOT measured: that a load during
+ * the start-up really falls more often (no pane was ever opened that early); THE RECORD's `reopen` and `fault` entries are
+ * what to revisit this number from.
+ */
+export const REOPEN_DELAY_MS = 30_000
+/**
+ * A mark older than this opens nothing and is deleted when its conversation returns (and by the sweep): 30 days. Of 183
+ * returns after a pause in 53 days of the app's logs the longest came after 14.8 days; a conversation left for longer than
+ * a month should not have a pane open by itself.
+ */
+export const PANE_MARK_TTL_MS = 30 * 24 * 60 * 60 * 1000
+/**
+ * THE SWEEP's threshold (pane-mark.ts paneMarksToDrop): only while more marks than this are listed does a newly written
+ * mark read the others and delete the expired and the unreadable ones. About 200 conversations were started in those 53
+ * days and a quarter of the paused ones never returned, so the sweep (one small read per mark) runs about once in months.
+ */
+export const PANE_MARKS_MAX = 200
+/**
+ * A delete of the mark that the store refused (its lock not won) is tried again by the next polls, this many times in all
+ * for one close: the mark of a pane the person closed must not stay, or the next process opens it again — but a store in
+ * trouble is not asked every POLL_MS for the life of the process.
+ */
+export const PANE_FORGET_TRIES = 3
 
 // ---------------------------------------------------------------------------
 // Module objects shared between register.tsx (writes) and ui.tsx (reads) — no

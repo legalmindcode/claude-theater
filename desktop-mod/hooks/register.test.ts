@@ -577,10 +577,13 @@ test('THE RECORD is bounded: a store that already holds OFFICE_LOG_MAX entries (
   expect(then).toHaveLength(OFFICE_LOG_MAX)
   expect(then.map(e => e.key).slice(0, -2)).toEqual(old.slice(2))
   expect(then.slice(-2).map(brief)).toEqual(['fault:1', `up:${CLIENT_RETRY_MS}`])
-  // every other key as it was seeded, and none of them written
+  // every other key as it was seeded, and none of them written; the one key beside them is this conversation's pane mark
+  // (THE REOPEN, reopen.test.ts: the first poll of a desktop session that finds the pane shown writes it, once), which
+  // the record's prune leaves alone
   expect(JSON.stringify([captured.store.prefs, captured.store.usageToast, captured.store.roomDone, captured.store.diag])).toBe(others)
-  expect(Object.keys(captured.storeWrites).filter(k => !k.startsWith(OFFICE_LOG_PREFIX))).toEqual([])
-  expect(Object.keys(captured.store).filter(k => !k.startsWith(OFFICE_LOG_PREFIX)).sort()).toEqual(['diag', 'prefs', 'roomDone', 'usageToast'])
+  expect(Object.keys(captured.storeWrites).filter(k => !k.startsWith(OFFICE_LOG_PREFIX))).toEqual(['pane:test-session'])
+  expect(captured.storeWrites['pane:test-session']).toBe(1)
+  expect(Object.keys(captured.store).filter(k => !k.startsWith(OFFICE_LOG_PREFIX)).sort()).toEqual(['diag', 'pane:test-session', 'prefs', 'roomDone', 'usageToast'])
   await ui.unmount()
 })
 

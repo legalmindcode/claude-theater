@@ -8,8 +8,9 @@
 //
 // ENGINE RULE (claude plugin validate): `$` is never passed to a function
 // imported from another file. Helpers that take `$` are declared HERE
-// (openPane, poll, loadPrefs, loadLogo, scanIo, ensurePolling, logOffice); imported modules get
-// closures (scanIo) or register their own hooks (registerUi).
+// (openPane, poll, loadPrefs, loadLogo, scanIo, ensurePolling, logOffice, paneKeyOf, rememberPane,
+// forgetPane, reopenPane); imported modules get closures (scanIo) or register their own hooks
+// (registerUi).
 //
 // Lifecycle:
 //   session.start   load prefs from $.store, remember the session id, register
@@ -17,7 +18,9 @@
 //                   read the logo's bytes once (decision 28b: loadLogo, the
 //                   desktop's credit row; the mod's only read of its own files),
 //                   take the five-hour meter's first reading
-//                   ($.session.usage; session.measure below).
+//                   ($.session.usage; session.measure below). Off the terminal
+//                   it also arms THE REOPEN's one timer (REOPEN_DELAY_MS; it
+//                   reads nothing here).
 //                   Each step is its own try: a failing $.command.register
 //                   (nothing answers it in a test harness, or a name clash)
 //                   never stops the office from scanning.
@@ -61,6 +64,11 @@
 //                   person) the files are NOT scanned — PAGE polled only while
 //                   the panel was visible — only the live map is aged so the
 //                   engine's statuses keep landing; openPane polls at once.
+//                   THE REOPEN's mirror rides the poll's ONE pane listing: the
+//                   pane first found shown → this conversation's mark written
+//                   to $.store; no longer listed → the mark deleted. After the
+//                   poll's latch is released and never awaited: a slow store
+//                   holds no scan and no publish.
 //                   In demo mode the payload is scanner's demoPayload — the one
 //                   demo cast; ui.tsx draws the cast published here (live check
 //                   7: a click's redraw once re-drew demoPayload(now), so the
@@ -84,6 +92,20 @@
 //   poll guards     one poll at a time (a helper process may take seconds; an
 //                   overlapping tick would race the caches) and a publish never
 //                   rolls the office back to an older scan.
+//   reopen          THE REOPEN (pane-mark.ts; the block above ensurePolling): the
+//                   desktop app ends a conversation's engine process (idle under
+//                   memory pressure, or the app restarting) and starts a new one
+//                   with the same conversation id and no pane. REOPEN_DELAY_MS
+//                   after session.start the new process opens the pane again when
+//                   its conversation's mark is in $.store, not expired, and no
+//                   pane is listed — silently (no toast even if the office then
+//                   falls), one `reopen` entry in THE RECORD. Never under the
+//                   terminal, never a pane the person closed.
+//   session.end     stops the mirror (a roster emptied while the process dies
+//                   must not read as "the person closed the pane") and drops a
+//                   reopen still pending; on `clear` the process goes on under
+//                   a new conversation id, so the cached key is forgotten and
+//                   the next poll marks the new id. Observe: next(e) as is.
 //
 // Files over 4 MiB ($.fs.read's limit): scanIo hands the scanner three optional
 // closures built over $.process.run — head(path, lines), tail(path, bytes) and
@@ -133,10 +155,11 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import { I18N } from './i18n'
 import { liveAgentReturned, liveAged, liveSpawned, liveToolReturned, liveToolStarted, mergeLive, type LiveMap } from './live'
-import { BRAND, CLIENT_ALIVE_GAP_MS, CLIENT_RETRIES, CLIENT_RETRY_MAX_MS, CLIENT_RETRY_MS, COMMAND, DEFAULT_PREFS, DEFAULT_VIEW, DESKTOP, EMPTY_PAYLOAD, LOGO_ASSET, LOGO_MAX_CHARS, PANE_ID, POLL_MS, STORE_PREFS_KEY, STORE_USAGE_TOAST_KEY, USAGE, type Agent, type Payload, type Prefs, type TheaterStatus } from './model'
+import { BRAND, CLIENT_ALIVE_GAP_MS, CLIENT_RETRIES, CLIENT_RETRY_MAX_MS, CLIENT_RETRY_MS, COMMAND, DEFAULT_PREFS, DEFAULT_VIEW, DESKTOP, EMPTY_PAYLOAD, LOGO_ASSET, LOGO_MAX_CHARS, PANE_FORGET_TRIES, PANE_ID, PANE_MARKS_MAX, POLL_MS, REOPEN_DELAY_MS, STORE_PANE_PREFIX, STORE_PREFS_KEY, STORE_USAGE_TOAST_KEY, USAGE, type Agent, type Payload, type Prefs, type TheaterStatus } from './model'
 import { cleanAgentText } from './office-chrome'
 import { cutWhy, nextOutage, noteCloses, officeLogKey, staleLogKeys, type OfficeLogBody, type Outage } from './office-log'
 import { isOfficeNote } from './office-props'
+import { paneMarkExpired, paneMarksToDrop, parsePaneMark, type PaneMark } from './pane-mark'
 import { demoPayload, scanAll, type ScanIo } from './scanner'
 import { FINISH_TOAST_MS, RECENT_DONE, STORE_ROOM_DONE_KEY, finishToast, officeView, paneTitle, parseRoomDone, registerUi, rememberRoomDone, renderKey, roomTitle, starsOf, textSurfaceActive, workingCount } from './ui'
 import { parseToastMark, pickFiveHour, resetClock, sameFiveHour, toastDue, usageLabel, usageThreshold, type FiveHour, type ToastMark } from './usage'
@@ -392,9 +415,21 @@ async function ding($: EngineInterface, muted: boolean, now: number): Promise<vo
 export async function poll($: EngineInterface): Promise<void> {
   if (polling) return
   polling = true
+  // what this poll's pane listing said, for THE REOPEN's mirror (below, in `finally`); undefined: no listing was answered
+  let seen: { shown: boolean; listed: boolean; at: number } | undefined
   try {
     const now = await $.clock.now()
-    const up = await paneIsUp($)
+    // ONE listing for the poll and for the mirror (a quiet poll makes no engine call more than before). In its own try, as
+    // paneIsUp's: a listing that throws reads as "pane down" here — the live map is still aged, no scan error is written —
+    // and as nothing at all by the mirror (neither "shown" nor "closed").
+    let panes: Awaited<ReturnType<typeof $.ui.panes>> | null = null
+    try {
+      panes = await $.ui.panes()
+    } catch {
+      // unanswerable
+    }
+    const up = panes !== null && panes.some(p => p.id === PANE_ID && p.isShown !== false)
+    if (panes !== null) seen = { shown: up, listed: panes.some(p => p.id === PANE_ID), at: now }
     const view = await read($, viewAtom)
     const sessionId = await read($, sessionIdAtom)
     let scanned: (Payload & { error?: string }) | undefined
@@ -560,6 +595,16 @@ export async function poll($: EngineInterface): Promise<void> {
     }
   } finally {
     polling = false
+    // THE REOPEN's mirror (the block above ensurePolling): the pane first found shown → the mark; no longer listed → the mark
+    // deleted. HERE, after the latch is released, and `void`: a $.store call takes a lock file and rewrites the whole store
+    // file, on a machine whose trouble is starvation — awaited inside the latch, a slow one would leave the office empty
+    // exactly when it was opened (every later tick returns at `polling`), and one that never answered would freeze it for
+    // the life of the process. Both helpers never reject and set their flag before their first await, so the next poll does
+    // not ask twice.
+    if (seen !== undefined && paneMemory) {
+      if (seen.shown && paneMarked !== true) void rememberPane($, seen.at)
+      else if (!seen.listed && paneMarked === true) void forgetPane($)
+    }
   }
 }
 
@@ -628,6 +673,162 @@ function retryClientNow($: EngineInterface): void {
 }
 /** THE DEMO SWITCH: the view.demo the render kick last polled for while the published payload disagreed (undefined once they agree). */
 let demoKicked: boolean | undefined
+
+// ---------------------------------------------------------------------------
+// THE REOPEN (pane-mark.ts: why a mark, its life, what it holds; model.ts
+// STORE_PANE_PREFIX: why one key per conversation). The poll MIRRORS the
+// engine's pane roster into this conversation's mark in $.store, and a new
+// process of the same conversation opens the pane again from it.
+//
+// WHY THE MARK WAITS FOR A PANE THAT IS SHOWN, not merely listed: every
+// headless engine process — a Workflow's subagents, a `-p` run — that spawns a
+// subagent auto-opens a pane no surface ever shows. Marking on "listed" would
+// write one mark per such run (filling the store's marks within days) and
+// would mark conversations whose pane no person ever saw. A pane the reopen
+// itself opened is the one exception (reopenPane): its conversation was marked
+// already.
+// WHY THE MARK GOES ONLY WHEN THE PANE IS NO LONGER LISTED: that is the
+// person's close (or the plugin's unload). A pane listed but shown by nothing
+// (the page detached, another tab in front of it) was not closed, and a
+// listing that cannot be read says nothing.
+// WHAT THE PERSON SEES: after the app restarted, or set an idle conversation
+// aside, the theater pane he had open comes back by itself about
+// REOPEN_DELAY_MS after that conversation's process starts — no toast, no
+// sound, no `focus` asked. A pane he closed does not come back; and since the
+// reopen is an opening like any other (paneOpened), a pane he closes AFTER a
+// reopen is not opened again by the first subagent of that process either: the
+// band's button and /theater are his way back.
+// NOT ON THE TERMINAL (`paneMemory`): a pane opening by itself half a minute
+// after `claude --resume` was never asked for; there nothing is written, read
+// or opened.
+// NOTHING HERE IS $.state: the mark is the store's, the flags are module
+// memory (a new process starts with none, which is the point), so the mirror
+// redraws nothing and the write budgets hold — one $.store write per process
+// and opening, one delete per close.
+// ---------------------------------------------------------------------------
+
+/** Whether this process keeps a mark at all: set by session.start (false under the terminal REPL), cleared by session.end. */
+let paneMemory = false
+/** This conversation's key (STORE_PANE_PREFIX + its id), asked at first need; undefined until then, and again after a /clear (session.end). */
+let paneKey: string | undefined
+/**
+ * What this process did with the mark: undefined — it never saw the pane shown (the reopen may still act); true — the mark
+ * is written, or being written; false — the pane was closed and the mark deleted, or being deleted. Set BEFORE the first
+ * await of rememberPane / forgetPane and asked again after it, so when an opening and a close overlap the last one wins.
+ */
+let paneMarked: boolean | undefined
+/** The deletes of the mark the store refused since the last opening (forgetPane: PANE_FORGET_TRIES). */
+let paneForgetTries = 0
+/** THE REOPEN's one pending timer (session.start arms it, session.end and the next session.start drop it). */
+let reopenTimer: Timer | undefined
+
+/** This conversation's mark key, or undefined while its id cannot be read (asked again at the next need). Never rejects. */
+async function paneKeyOf($: EngineInterface): Promise<string | undefined> {
+  if (paneKey !== undefined) return paneKey
+  const id = await $.session.id().catch(() => '')
+  if (id !== '') paneKey ??= STORE_PANE_PREFIX + id
+  return paneKey
+}
+
+/**
+ * The pane is shown (or was just opened again): this conversation's mark, `{ at: now }` — ONE $.store write per process and
+ * opening (`paneMarked`: a pane raised, retitled or polled again writes nothing). A write the store refuses (over its size,
+ * the lock not won) is not tried again in this process: a retry every poll would hammer a store already in trouble, and
+ * the only loss is that this conversation's pane does not come back once. A pane closed while the write was still pending
+ * is deleted again after it (the late write must not leave the mark of a closed pane). Then THE SWEEP (pane-mark.ts
+ * paneMarksToDrop), only here, right after a mark was written: one key listing, and only past PANE_MARKS_MAX marks a read
+ * of each and the deletes of the dead ones. Never rejects; always called with `void` by the poll.
+ */
+async function rememberPane($: EngineInterface, now: number): Promise<void> {
+  if (!paneMemory || paneMarked === true) return
+  paneMarked = true
+  paneForgetTries = 0
+  try {
+    const key = await paneKeyOf($)
+    if (key === undefined || paneMarked !== true) return
+    await $.store.set(key, { at: now })
+    if (paneMarked !== true) {
+      // (closed meanwhile: forgetPane's delete may have run before this write landed. After a /clear — undefined — the key
+      // written is the cleared conversation's own and stays)
+      if (paneMarked === false) await $.store.delete(key)
+      return
+    }
+    const keys = (await $.store.keys()).filter(k => k.startsWith(STORE_PANE_PREFIX))
+    if (keys.length <= PANE_MARKS_MAX) return
+    const marks: Array<{ key: string; mark: PaneMark | null }> = []
+    for (const k of keys) marks.push({ key: k, mark: k === key ? { at: now } : parsePaneMark(await $.store.get(k)) })
+    for (const k of paneMarksToDrop(marks, now, key)) await $.store.delete(k).catch(() => undefined)
+  } catch {
+    // not written, or not swept: this conversation's pane does not come back once; the next mark's sweep sweeps
+  }
+}
+
+/**
+ * The pane is no longer listed — the person closed it: this conversation's mark is deleted, so no later process opens it.
+ * A delete the store refused must not leave that mark (the one outcome THE REOPEN may never have is a closed pane coming
+ * back): the flag goes back to "written" and the next poll tries again, PANE_FORGET_TRIES times in all for one close, so a
+ * broken store is not asked every POLL_MS for ever. A pane opened again while the delete was still to be made keeps its
+ * mark (the flag is asked again after the await). Never rejects; always called with `void` by the poll.
+ */
+async function forgetPane($: EngineInterface): Promise<void> {
+  if (!paneMemory || paneMarked !== true) return
+  paneMarked = false
+  try {
+    const key = await paneKeyOf($)
+    if (key === undefined || paneMarked !== false) return
+    await $.store.delete(key)
+    paneForgetTries = 0
+  } catch {
+    paneForgetTries++
+    if (paneMarked === false && paneForgetTries < PANE_FORGET_TRIES) paneMarked = true
+  }
+}
+
+/**
+ * THE REOPEN itself, run once by session.start's timer. In order: nothing if this process already saw the pane shown or
+ * closed (a subagent or /theater opened it inside the delay — and the person may have closed it since: the pending reopen
+ * yields); the conversation's mark is read — none, or unreadable: nothing; expired: deleted, nothing; the roster is asked,
+ * and the first check made again (the awaits took time). No pane listed → openPane, the same opening /theater makes (the
+ * title in the current language, paneOpened, a spent retry wave tried again, a poll at once), with no toast, no command
+ * text, no chime and no `focus` — and with `clientTold` set first: the person did not ask for the pane at this moment, and
+ * a reopen comes after an eviction, when memory is short and frames fall, so a fall of the office right after it shows the
+ * text cards and its retries as ever (and is recorded) but does not toast; /theater tells again, as always. A pane already
+ * listed (a reload of the module; an opening still waiting for a surface) is not opened again.
+ * Then, if the pane is listed now: the mark is dated anew AT ONCE, shown or not — a pane the reopen opened that no surface
+ * shows yet would otherwise be closed later with its old mark never deleted — and an opening made here writes one `reopen`
+ * entry to THE RECORD (never awaited). An opening the host did not take (`$.ui.open` rejected, or no pane listed after it)
+ * changes nothing: the old mark stays for the next process, `clientTold` is put back, and nothing is tried again in this
+ * one. Never rejects.
+ */
+async function reopenPane($: EngineInterface): Promise<void> {
+  try {
+    if (!paneMemory || paneMarked !== undefined) return
+    const key = await paneKeyOf($)
+    if (key === undefined) return
+    const mark = parsePaneMark(await $.store.get(key))
+    if (mark === null) return
+    if (paneMarkExpired(mark, await $.clock.now())) {
+      await $.store.delete(key)
+      return
+    }
+    const listed = await paneIsOpen($)
+    if (!paneMemory || paneMarked !== undefined) return
+    if (!listed) {
+      const told = clientTold
+      clientTold = true
+      await openPane($)
+      if (!(await paneIsOpen($))) {
+        clientTold = told
+        return
+      }
+    }
+    const now = await $.clock.now()
+    if (!listed) void logOffice($, { k: 'reopen' }, now)
+    await rememberPane($, now)
+  } catch {
+    // the mark stays as it was: the next process of this conversation tries again
+  }
+}
 
 /**
  * Starts the poll timer unless this environment already runs one; `restart`
@@ -778,7 +979,7 @@ async function loadPrefs($: EngineInterface): Promise<Prefs> {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    // Six independent steps, each in its own try: none may block the session,
+    // Seven independent steps, each in its own try: none may block the session,
     // and none may stop the ones after it (a /theater that cannot be registered
     // must still leave a scanning office behind).
     let prefs: Prefs = DEFAULT_PREFS
@@ -803,7 +1004,24 @@ export const register: Register = on => {
     } catch {
       // the pane still auto-opens on the first subagent
     }
+    // THE REOPEN: only off the terminal REPL (the app-hosted engine starts with no surface at all, `null`). Set before the
+    // poll is started, so the first poll already mirrors the pane; the timer reads nothing here — the mark, the conversation's
+    // id and the roster are asked when it fires. A session.start raised again in this process replaces the timer: one reopen
+    // at most.
+    paneMemory = e.surface !== 'terminal'
     ensurePolling($, true)
+    try {
+      reopenTimer?.cancel()
+      reopenTimer = undefined
+      if (paneMemory) {
+        reopenTimer = $.clock.after(REOPEN_DELAY_MS, () => {
+          reopenTimer = undefined
+          void reopenPane($)
+        })
+      }
+    } catch {
+      // no timer on this host: the pane comes back at the next subagent or /theater, as before
+    }
     // THE LOGO (decision 28b): its bytes, once per load, for the desktop's credit row — its own try inside (a missing file: no
     // logo, the credit still drawn); after the poll is started, so the read never holds the office back
     await loadLogo($)
@@ -819,6 +1037,32 @@ export const register: Register = on => {
       // no reading on this host: no meter until a measurement brings one
     }
     await takeUsage($, fiveHour, true, prefs.lang)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // THE REOPEN's guard at the session's end. Any end but a /clear means this process is going away (an exit, a signal, a
+  // logout, another conversation resumed in its place): the mirror stops and a reopen still pending is dropped — if the
+  // engine empties its pane roster on the way down while the poll still runs, that must not read as "the person closed the
+  // pane" and delete the mark (not seen in the engine's code, and not verifiable in the kit: this is the insurance; where
+  // the app kills the process outright the hook never runs and nothing is lost by it). A /clear is the other case
+  // (SessionEndInput): the conversation ends, the SAME process goes on under a NEW id with the pane still up, and no
+  // session.start follows — so the cached key and the flag are forgotten and the next poll marks the new id (one write);
+  // the cleared conversation's own mark is left where it is. Nothing is awaited: the whole chain shares the exit's one
+  // short bound. Observe: next(e) as is.
+  on('session.end', async ($, e, next) => {
+    try {
+      if (e.reason === 'clear') {
+        paneKey = undefined
+        paneMarked = undefined
+        paneForgetTries = 0
+      } else {
+        paneMemory = false
+        reopenTimer?.cancel()
+        reopenTimer = undefined
+      }
+    } catch {
+      // never holds the exit
+    }
     return next(e)
   }).catch(($, e, next) => next(e))
 
