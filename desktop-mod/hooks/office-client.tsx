@@ -167,7 +167,26 @@
 // and THE OUTBOX's clearing (`surface.every`, one-shots started from events:
 // every post is a batch of the frame's actions, each numbered once — live check
 // 7, R12); the render never calls `setState` (the one
-// init aside) — what must survive between renders without a redraw lives in
+// init aside) and posts ONE thing, once per instance — THE MOUNT NOTE,
+// `{ t: 'mounted' }`, on the first call that finds the instance already set up
+// (in practice the second: the init's own `setState` asks for it), so the hooks
+// can record that a Client really drew again after a fall (register.tsx THE
+// RECORD; office-log.ts says what the note can and cannot prove). Why the
+// second call and not the first: on the desktop page this was read against
+// (Claude 5.1231.2.0, engine 2.1.321) a redraw is asked for only after the page
+// took the first render's answer and accepted its tree (its `we()` runs
+// `le(tree)` and then `oe()`), so the note means "the first tree was drawn" —
+// by that build's ordering, not by contract: after an update it may mean no
+// more than "the module was called twice". The note is no action: it goes
+// straight to `surface.post`, outside the outbox — no number, no batch, no
+// clock, no setState — and the hooks answer it with no props, so it causes no
+// render. The page keeps ONE undelivered post, so the note waits while a press
+// is still in the outbox (a later call posts it; it must never replace a
+// click), and a press in the frame after it may replace the note instead: a
+// lost note is harmless, a lost click is not. While the note's round trip is
+// in flight the page holds a later post back until the hooks answered, so the
+// hooks answer a note at once and never wait for the store. What must survive
+// between renders without a redraw lives in
 // `state.inst`, a record mutated in place (the model, the mode's rank, the
 // search text); `setState` is called only from events (a press, a key, the
 // pointer's leave). The
@@ -198,7 +217,7 @@ import { COMPACT_BELOW, CREDIT_ROWS, DRAWER_FRAME_ROWS, WINDOW_ROWS, cleanSearch
 import type { DrawerLine } from './office-chrome'
 import { BRAND_ACCENT_DARK, CARD_BORDER, COUNT_ICON, FIT, NBSP, NO_DECOR, PIN, PIN_OFF, TITLE_GAP, cut, fitCells, fitLine, geometry, iconLabel, nb, officeModel, roomCache, textWidth, trimWindow } from './office-layout'
 import type { Floors, Geo, ModeToken, OfficeDecor, OfficeModel, RoomCache, RoomView, RowView } from './office-layout'
-import type { OfficeBatch, OfficeItem, OfficeMessage, OfficeProps } from './office-props'
+import type { OfficeBatch, OfficeItem, OfficeMessage, OfficeNote, OfficeProps } from './office-props'
 import { usageLabel, usageShort, usageTiny } from './usage'
 
 export const SEARCH_DEBOUNCE_MS = 150
@@ -211,6 +230,8 @@ export const SEARCH_DEBOUNCE_MS = 150
  */
 export const OUTBOX_FLUSH_MS = 1
 export const OUTBOX_MAX = 8
+/** THE MOUNT NOTE as posted (the header's Discipline; office-props.ts OfficeNote): no id, no number — it says one thing, once. */
+const MOUNT_NOTE: OfficeNote = { t: 'mounted' }
 /** The toolbar's gap between its Buttons (the probe's). */
 export const TOOLBAR_GAP = 2
 /** The search field on the toolbar's line (from ONE_LINE_FROM): its width in cells, between these, after the toolbar's cells. */
@@ -266,6 +287,8 @@ export type OfficeInst = {
   seq: number
   outbox: OfficeItem[]
   flush: (() => void) | null
+  /** THE MOUNT NOTE was posted (or tried: a post the surface refused is not tried again): once per instance. */
+  noted: boolean
 }
 /** The local state: what a redraw reads (`setState` only from events). `focus` is the keyboard focus (j / k): the one decor the model lays. */
 export type OfficeState = { focus: string | null; inst: OfficeInst }
@@ -367,7 +390,7 @@ function newInst(p: OfficeProps): OfficeInst {
     props: p, chrome: 0, model: { rooms: [], lines: [], geo: geometry(p.columns), mode: { rank: 0, word: true, model: 'family', nameMax: 0 }, token: { rank: 0, key: '' }, floors: null, statusMin: 0 }, lastMode: null, frozen: null,
     rowAt: new Map(), order: [], win: { from: 0, count: 0 }, cache: roomCache(), drawerKey: '', drawer: [],
     query: cleanSearch(p.search), propsSearch: p.search, posted: null, debounce: null, typing: false, height: 0, offset: 0, body: 0,
-    id: Math.random().toString(36).slice(2, 10) || 'office', seq: 0, outbox: [], flush: null,
+    id: Math.random().toString(36).slice(2, 10) || 'office', seq: 0, outbox: [], flush: null, noted: false,
   }
   setModel(inst, p, NO_DECOR)
   return inst
@@ -479,6 +502,15 @@ const Office: ClientModule<OfficeProps, OfficeState> = (props, surface) => {
       listen(surface)
       s = { focus: null, inst: newInst(props) }
       surface.setState(s)
+    } else if (!s.inst.noted && s.inst.outbox.length === 0) {
+      // THE MOUNT NOTE (the header's Discipline): this instance was drawn and is called again — said once, for the record
+      // of the office's recoveries. Not while a press waits in the outbox: the note would replace it in the page's one slot.
+      s.inst.noted = true
+      try {
+        surface.post(MOUNT_NOTE)
+      } catch {
+        // the note is a by-product: a surface that refuses it still gets its office drawn
+      }
     }
     const inst = s.inst
     inst.props = props

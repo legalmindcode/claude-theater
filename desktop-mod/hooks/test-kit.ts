@@ -14,7 +14,10 @@
 // a test can make two office posts' hooks overlap). A `bytes` read (the
 // plugin's one: session.start's logo, decision 28b) is answered from
 // `captured.bytes` — set it before session.start — and is NO logo otherwise,
-// never the file on disk: the tests stay hermetic.
+// never the file on disk: the tests stay hermetic. Two switches make a call
+// reject beneath, for THE RECORD's tests (register.test.ts): `sessionIdDown`
+// ($.session.id) and `storeKeysDown` ($.store.keys); a store write that is
+// refused is a `hold` on its key whose promise rejects.
 
 import type { On } from 'claude-code'
 import { mock } from 'claude-code/testing'
@@ -48,7 +51,7 @@ export function beneath(on: On, current: () => Agent[], store: Record<string, un
     writes: { payload: 0, scanError: 0, view: 0, tick: 0, prefs: 0 } as Writes,
     /** $.store writes seen beneath the plugin, by key (the housekeeping's budget: the prefs mirror, roomDone). */
     storeWrites: {} as Record<string, number>,
-    /** $.fs.write calls seen beneath the plugin: none is expected (the diagnostics log is gone). */
+    /** $.fs.write calls seen beneath the plugin: none is expected (the mod writes no file: THE RECORD of the office's falls is `$.store` keys, register.tsx). */
     fsWrites: 0,
     /**
      * THE LOGO (decision 28b): what a `bytes` read answers ($.fs.read(path, { as: 'bytes' }): the plugin's one, session.start's
@@ -77,6 +80,10 @@ export function beneath(on: On, current: () => Agent[], store: Record<string, un
     onScan: null as (() => void) | null,
     /** True → $.agent.list answers no list at all: the poll's ageing of the live map (a step past the scan, the poll's alone) throws. */
     agentListBroken: false,
+    /** True → $.session.id rejects beneath (a hook that throws is skipped, and nothing answers under it): THE RECORD's entry then names no conversation. */
+    sessionIdDown: false,
+    /** True → $.store.keys rejects beneath: THE RECORD's prune cannot list the store. */
+    storeKeysDown: false,
     /**
      * ONE-SHOT HOLDS: the plugin's next write of a key waits beneath for its promise — `<key>` a $.store write, `state:<key>` a
      * $.state write — then lands (a slow store, a loaded host: what makes two office posts' hooks overlap). `seq` records
@@ -107,7 +114,10 @@ export function beneath(on: On, current: () => Agent[], store: Record<string, un
     return h ? h.then(land) : land()
   })
   on('store.delete', ($, e) => { delete captured.store[e.key]; return { value: undefined } })
-  on('store.keys', () => ({ value: Object.keys(captured.store) }))
+  on('store.keys', () => {
+    if (captured.storeKeysDown) throw new Error('store keys down')
+    return { value: Object.keys(captured.store) }
+  })
   // the environment beneath (what mock.env would hook), with a failure switch for the failed-scan test
   const env: Record<string, string> = { HOME: TEST_HOME, USERPROFILE: TEST_HOME }
   on('env.get', ($, e) => {
@@ -120,7 +130,10 @@ export function beneath(on: On, current: () => Agent[], store: Record<string, un
     return { value: env[e.name] }
   })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  on('session.id', () => ({ value: 'test-session' }))
+  on('session.id', () => {
+    if (captured.sessionIdDown) throw new Error('session id down')
+    return { value: 'test-session' }
+  })
   // nothing beneath the plugins answers command.register: without this the plugin's
   // session.start would abort before starting the poll
   on('command.register', ($, e) => ({ value: { command: e.name } }))

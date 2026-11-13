@@ -107,6 +107,17 @@ export type OfficeMessage =
 export type OfficeItem = OfficeMessage & { n: number }
 /** What the module posts (live check 7, R12): its id and the outbox's actions — a later post in the same frame carries the earlier ones. */
 export type OfficeBatch = { t: 'batch'; i: string; items: OfficeItem[] }
+/**
+ * THE MOUNT NOTE (office-client.tsx; office-log.ts THE RECORD): what a Client instance posts once, on its second call — "I
+ * was drawn and called again". Deliberately NOT an OfficeMessage: it is no action, so it is never numbered and never an item
+ * of a batch (THE OUTBOX's `send` cannot carry it by type), and the hooks answer it in register.tsx, ahead of ui.tsx's
+ * message hook, which never sees it.
+ */
+export type OfficeNote = { t: 'mounted' }
+/** Whether a post's data is THE MOUNT NOTE: an object (no list) whose `t` is `mounted`. A batch is not one, whatever its items say: it goes on to ui.tsx, which ignores an item it does not know. */
+export function isOfficeNote(data: unknown): data is OfficeNote {
+  return typeof data === 'object' && data !== null && !Array.isArray(data) && (data as { t?: unknown }).t === 'mounted'
+}
 
 /** What the builder reads: the office's state at `now` (ms), and the pane's geometry. */
 export type OfficePropsInput = {

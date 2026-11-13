@@ -78,6 +78,10 @@ type Fake = {
   surface: ClientSurface<OfficeState>
   posts: OfficeMessage[]
   raw: unknown[]
+  /** THE MOUNT NOTE's posts (office-client.tsx): no action, so kept out of `raw` and `posts`. */
+  notes: unknown[]
+  /** `on` true → every `surface.post` throws (a surface that refuses a post). */
+  throwing: { on: boolean }
   debounces: () => Array<{ ms: number; fn: () => void; stopped: boolean }>
   timers: Array<{ ms: number; fn: () => void; stopped: boolean }>
   setStates: () => number
@@ -91,6 +95,8 @@ type Fake = {
 function fake(columns = 45, rows = 0): Fake {
   const posts: OfficeMessage[] = []
   const raw: unknown[] = []
+  const notes: unknown[] = []
+  const throwing = { on: false }
   const applied = new Map<string, number>()
   const timers: Fake['timers'] = []
   let onPointer: ((e: ClientPointerEvent) => void) | undefined
@@ -109,6 +115,9 @@ function fake(columns = 45, rows = 0): Fake {
     onPointer(fn: (e: ClientPointerEvent) => void) { onPointer = fn; return () => { onPointer = undefined } },
     onKey(fn: (e: ClientKeyEvent) => void) { onKey = fn; return () => { onKey = undefined } },
     post(d: unknown) {
+      if (throwing.on) throw new Error('post refused')
+      // THE MOUNT NOTE is no action: set aside, so `raw` and `posts` stay the outbox's own
+      if ((d as { t?: string } | null)?.t === 'mounted') { notes.push(d); return }
       raw.push(d)
       const b = d as { t?: string; i?: string; items?: Array<OfficeMessage & { n: number }> }
       if (b.t !== 'batch') { posts.push(d as OfficeMessage); return }
@@ -120,7 +129,7 @@ function fake(columns = 45, rows = 0): Fake {
     },
   }
   return {
-    surface: surface as unknown as ClientSurface<OfficeState>, posts, raw, timers,
+    surface: surface as unknown as ClientSurface<OfficeState>, posts, raw, notes, throwing, timers,
     debounces: () => timers.filter(t => t.ms === SEARCH_DEBOUNCE_MS),
     setStates: () => sets,
     pointer: e => onPointer?.(e), key: e => onKey?.(e),
@@ -587,6 +596,58 @@ test('THE OUTBOX (live check 7, R12: one post per frame, a later one replacing a
   const t2 = Office(props(), g.surface)
   ;(byKey(t2, 'mute', 'Button')!.props.onPress as () => void)()
   expect((g.raw[0] as { i: string }).i).not.toBe(first!.i)
+})
+
+test('THE MOUNT NOTE (the record of the office\'s recoveries, register.tsx THE RECORD): the first call posts nothing; the second posts `{ t: \'mounted\' }` once — no batch, no number, no clock, no setState; nothing after it posts it again; a press still in the outbox makes the note wait for a later call (one post a frame: the note must never replace a click); a fresh instance posts its own; a post that throws leaves the tree drawn', () => {
+  const f = fake()
+  const p = props()
+  const first = JSON.stringify(Office(p, f.surface))
+  expect(f.notes).toEqual([])                 // the first call: the page has not taken its tree yet
+  Office(p, f.surface)
+  expect(f.notes).toEqual([{ t: 'mounted' }]) // the second: the note, as it is
+  expect(f.raw).toEqual([])                   // outside THE OUTBOX: no batch
+  expect(f.posts).toEqual([])
+  expect(f.timers).toHaveLength(0)
+  expect(f.setStates()).toBe(1)               // (the one init)
+  expect(f.surface.state!.inst.seq).toBe(0)   // no number spent on it
+  // once per instance: more calls, new props, a press, a key, the pointer's leave and a tick never post it again
+  const tree = Office(p, f.surface)
+  expect(JSON.stringify(tree)).toBe(first)    // (and it changed nothing drawn)
+  Office({ ...p, columns: 80 }, f.surface)
+  f.press(tree, 'showDone')
+  f.key({ key: 'j' })
+  f.pointer({ type: 'leave', x: 0, y: 0 })
+  f.tick()
+  Office(p, f.surface)
+  Office(p, f.surface)
+  expect(f.notes).toHaveLength(1)
+  expect(f.posts).toEqual([{ t: 'showDone' }])
+  // A PRESS BEFORE THE SECOND CALL: its batch is posted and still in the outbox, so the note waits (the page holds one post a
+  // frame, and a later post replaces an undelivered one) — until a call that finds the outbox cleared
+  const g = fake()
+  const t1 = Office(p, g.surface)
+  g.press(t1, 'mute')
+  expect(g.raw).toHaveLength(1)
+  Office(p, g.surface)
+  Office(p, g.surface)
+  expect(g.notes).toEqual([])
+  expect(g.raw).toHaveLength(1)               // the click's batch, never replaced
+  g.tick()                                    // the next frame: the outbox cleared
+  Office(p, g.surface)
+  expect(g.notes).toEqual([{ t: 'mounted' }])
+  Office(p, g.surface)
+  expect(g.notes).toHaveLength(1)
+  expect(g.posts).toEqual([{ t: 'mute' }])
+  // a surface that refuses the post: the office is drawn all the same (no red text), and the note is not tried again
+  const h = fake()
+  Office(p, h.surface)
+  h.throwing.on = true
+  const drawn = Office(p, h.surface) as unknown as Node
+  expect(drawn.type).toBe('Box')
+  expect(JSON.stringify(drawn)).toBe(first)
+  h.throwing.on = false
+  Office(p, h.surface)
+  expect(h.notes).toEqual([])
 })
 
 test('THE FINISH IS THE ★ ALONE (live check 6: the row\'s tint flashed a near-black band on the light theme): a new ★ stamp marks the finisher\'s status column and nothing else — no cell tinted, no clock started, no redraw of the module\'s own; the first props, a status change and a newcomer alike; the module exports no tint', () => {

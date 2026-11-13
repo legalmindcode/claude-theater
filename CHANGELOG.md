@@ -24,6 +24,20 @@ function-hooks API, which may change between releases.
 
 ## [Unreleased]
 
+### Added
+
+- **A small permanent record of the desktop office's falls and recoveries.**
+  When the office falls back to the text cards, and when it draws again, the mod
+  now notes it in its own local storage: the time, the conversation's id, the
+  stage at which the app gave up and its one-line reason, and which automatic
+  retry followed — and a note when `/theater` was run while the cards showed.
+  It is there for diagnosing the next wave of faults, which never happen in the
+  tests and whose trace in the app's logs is gone within days. It holds no
+  conversation text, keeps the newest 100 entries (about 30 KB), is written
+  beside the office's work and never delays it, and a session with no fall
+  writes nothing. Nothing changed in what the office draws; README and SECURITY
+  now say what the mod writes.
+
 ### Removed
 
 - **The Python app and its browser UI.** `claude_theater.py` — the single-file

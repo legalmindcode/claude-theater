@@ -8,7 +8,7 @@
 //
 // ENGINE RULE (claude plugin validate): `$` is never passed to a function
 // imported from another file. Helpers that take `$` are declared HERE
-// (openPane, poll, loadPrefs, loadLogo, scanIo, ensurePolling); imported modules get
+// (openPane, poll, loadPrefs, loadLogo, scanIo, ensurePolling, logOffice); imported modules get
 // closures (scanIo) or register their own hooks (registerUi).
 //
 // Lifecycle:
@@ -102,13 +102,26 @@
 //                   the main loop's Agent (or Task, the older alias) call:
 //                   liveAgentReturned (its result).
 //   command.run     /theater → $.ui.open (always, asked by the person); clears
-//                   DESKTOP.clientFailed first, so a failed office Client is tried again.
+//                   DESKTOP.clientFailed first, so a failed office Client is tried again
+//                   (THE RECORD: `asked`, when the cards were showing).
 //   ui.fault        the desktop office Client (OFFICE_KEY) failed → DESKTOP.clientFailed:
 //                   the desktop pane draws the text cards; one toast; a redraw; then
 //                   the Client is tried again CLIENT_RETRY_MS later, the gap doubled per
 //                   retry up to CLIENT_RETRY_MAX_MS, CLIENT_RETRIES times per wave (a wave
 //                   anew once the Client was up CLIENT_ALIVE_GAP_MS, or at a subagent spawn
 //                   / an opening of the pane with the wave spent: retryClientNow).
+//                   THE RECORD (office-log.ts; logOffice below): each such fault is
+//                   one `$.store` key of its own — when, which conversation, the
+//                   phase, the surface's reason cut to a line, the retry armed —
+//                   written beside the hook's work, never awaited by it.
+//   ui.message      THE MOUNT NOTE alone (office-client.tsx: a Client instance's
+//                   `{ t: 'mounted' }`, posted on its second call): answered `{}`
+//                   here, in a hook registered AHEAD of ui.tsx's (a plugin's hooks
+//                   nest in the order registered, the first outermost), so
+//                   ui.tsx's hook and its NEWEST ANSWER counters never see a note;
+//                   heard while an outage is open and the Client is the one drawn,
+//                   it closes the outage and THE RECORD gains `up`. Everything
+//                   else goes on with next(e):
 //   (ui.message     the office Client's posts: ui.tsx registerUi, beside the press
 //                   handlers it shares with the text cards.)
 // Every hook: wrapped in try/catch AND `.catch` so the office never blocks Claude.
@@ -122,6 +135,8 @@ import { I18N } from './i18n'
 import { liveAgentReturned, liveAged, liveSpawned, liveToolReturned, liveToolStarted, mergeLive, type LiveMap } from './live'
 import { BRAND, CLIENT_ALIVE_GAP_MS, CLIENT_RETRIES, CLIENT_RETRY_MAX_MS, CLIENT_RETRY_MS, COMMAND, DEFAULT_PREFS, DEFAULT_VIEW, DESKTOP, EMPTY_PAYLOAD, LOGO_ASSET, LOGO_MAX_CHARS, PANE_ID, POLL_MS, STORE_PREFS_KEY, STORE_USAGE_TOAST_KEY, USAGE, type Agent, type Payload, type Prefs, type TheaterStatus } from './model'
 import { cleanAgentText } from './office-chrome'
+import { cutWhy, nextOutage, noteCloses, officeLogKey, staleLogKeys, type OfficeLogBody, type Outage } from './office-log'
+import { isOfficeNote } from './office-props'
 import { demoPayload, scanAll, type ScanIo } from './scanner'
 import { FINISH_TOAST_MS, RECENT_DONE, STORE_ROOM_DONE_KEY, finishToast, officeView, paneTitle, parseRoomDone, registerUi, rememberRoomDone, renderKey, roomTitle, starsOf, textSurfaceActive, workingCount } from './ui'
 import { parseToastMark, pickFiveHour, resetClock, sameFiveHour, toastDue, usageLabel, usageThreshold, type FiveHour, type ToastMark } from './usage'
@@ -562,6 +577,40 @@ let clientRetryTimer: Timer | undefined
 let clientLastFaultAt = 0
 let clientTold = false
 /**
+ * THE RECORD (office-log.ts: what is kept, why one `$.store` key per entry, and what an entry can and cannot prove). THE
+ * OUTAGE open now — opened by the first recorded fault, one fault more per recorded fault, closed by THE MOUNT NOTE of a
+ * Client that drew again (the ui.message hook below), which writes `up`; null: none. /theater, a spawn and the retry timers
+ * do not touch it: only a Client that really came back closes it. And the count of the entries this process wrote, which
+ * ends each entry's key (two entries of one millisecond never share one). Module memory, like the retries: a hot reload
+ * clears both, and an outage open then gets no `up`.
+ */
+let clientOutage: Outage | null = null
+let officeLogSeq = 0
+/**
+ * THE RECORD's writer: one entry under a key of its own (`$.store.set` — the engine locks the store file around each single
+ * set, so entries of several conversations' processes never overwrite each other), then the prune (the record's own keys
+ * past the newest OFFICE_LOG_MAX: `$.store.keys`, `$.store.delete`). It never reads an entry back, never writes `$.state`
+ * and never redraws: a record write costs the office nothing it shows. `at` is the engine's clock when the caller already
+ * read it (0: read here; a clock that cannot be read leaves `t` 0); a conversation id that cannot be read is ''.
+ * A BY-PRODUCT: it never rejects and is always called with `void` — a store that is slow, full or locked loses that entry
+ * and nothing else (the cards, the retry, the toast and the hook's answer never wait for it); a prune that fails leaves the
+ * entry in place for the next write's prune.
+ * Called as `void logOffice($, { k: 'fault', phase, why, retry }, now)`, `void logOffice($, { k: 'up', after, faults }, now)`,
+ * `void logOffice($, { k: 'asked' })` and `void logOffice($, { k: 'reopen' })`.
+ */
+async function logOffice($: EngineInterface, body: OfficeLogBody, at = 0): Promise<void> {
+  try {
+    // (the count is taken before the first await: entries are numbered in the order they were asked for)
+    const seq = ++officeLogSeq
+    const t = at > 0 ? at : await $.clock.now().catch(() => 0)
+    const sid = await $.session.id().catch(() => '')
+    await $.store.set(officeLogKey(t, sid, seq), { t, sid, ...body })
+    for (const key of staleLogKeys(await $.store.keys())) await $.store.delete(key).catch(() => undefined)
+  } catch {
+    // the record is a by-product: this entry (or this prune) is lost, the office is not
+  }
+}
+/**
  * THE OFFICE ASKED FOR AGAIN (a subagent spawn, the pane opened): the Client on the cards with its wave spent is tried again
  * at once, the retries counted anew — silently (the person was told at the wave's first fault). A wave still running (a
  * retry pending) keeps its own time; nothing while the Client is up. /theater (command.run) is the person's own, told
@@ -796,6 +845,8 @@ export const register: Register = on => {
       clientTold = false
       if (DESKTOP.clientFailed) {
         DESKTOP.clientFailed = false
+        // THE RECORD: the person asked for the office while the cards showed (never awaited; with the Client up: no entry)
+        void logOffice($, { k: 'asked' })
         try {
           $.ui.invalidate('ui.render')
         } catch {
@@ -830,7 +881,10 @@ export const register: Register = on => {
   // line); /theater (above) still clears the flag at once, restarts the count, cancels a retry still pending and tells
   // again on the next fault. Observe only: core answers `{}`. The engine redraws the site itself after a fault; the
   // invalidate is for a fault it would not redraw for (a Client born in that redraw). `e.reason` is the surface's
-  // untrusted text: logged to the debug log, never parsed.
+  // untrusted text: logged to the debug log, never parsed. THE RECORD (office-log.ts): every fault handled here — one per
+  // fall the person can see; a fault while the cards already show is not handled and not recorded — opens or extends THE
+  // OUTAGE and writes one `fault` entry (the phase, the reason cut to a line, the retry this fault armed; 0: none, the
+  // cards stay), after the retry is armed and never awaited: the fall-back, the retry and the toast do not wait for a store.
   on('ui.fault', { element: 'office' }, async ($, e, next) => { // OFFICE_KEY, as a literal: validate reads a matcher statically
     try {
       if (!DESKTOP.clientFailed) {
@@ -840,9 +894,11 @@ export const register: Register = on => {
         if (clientLastFaultAt !== 0 && now - clientLastFaultAt >= CLIENT_ALIVE_GAP_MS) clientRetries = 0
         clientLastFaultAt = now
         // the retry is scheduled first: the log / toast below must not be able to lose it
+        let retry = 0
         if (clientRetries < CLIENT_RETRIES) {
           const gap = Math.min(CLIENT_RETRY_MS * 2 ** clientRetries, CLIENT_RETRY_MAX_MS)
           clientRetries++
+          retry = clientRetries
           clientRetryTimer?.cancel()
           clientRetryTimer = $.clock.after(gap, () => {
             clientRetryTimer = undefined
@@ -856,6 +912,9 @@ export const register: Register = on => {
             }
           })
         }
+        // THE RECORD: this fall, beside the hook's work (`void`: a slow store holds nothing back)
+        clientOutage = nextOutage(clientOutage, now)
+        void logOffice($, { k: 'fault', phase: e.phase, why: cutWhy(e.reason), retry }, now)
         if (!clientTold) {
           clientTold = true
           // (the reason to the debug log alone: the transcript carried it for live check 4 only, 18.10 — gone with the release,
@@ -999,6 +1058,33 @@ export const register: Register = on => {
     } catch {
       return next(e)
     }
+  }).catch(($, e, next) => next(e))
+
+  // THE MOUNT NOTE (office-client.tsx; THE RECORD, office-log.ts): a Client instance says, once, that it was drawn and
+  // called again — the positive signal of a recovery. (Inferring one from silence after a retry was rejected: in the
+  // 28.10 diagnostic "the hooks drew the Client again" was followed by another fault seven times out of nine.) Registered
+  // AHEAD of ui.tsx's message hook (registerUi below; first registered, outermost), so a note is answered here — `{}`:
+  // heard, no props, hence no render of the Client and nothing for the page's 2 s limit to time — and ui.tsx's hook and
+  // its NEWEST ANSWER counters never see one; anything that is no note goes on with next(e), untouched. `up` is written
+  // only while an outage is open AND the Client is the one drawn (office-log.ts noteCloses): a note still in flight from
+  // the instance that then faulted (the cards show) must not close the outage with a false recovery of a few ms — the
+  // kit cannot stage that order (it refuses a post while the drawing holds no Client), so the rule is tested pure. The
+  // page holds the Client's next post until this hook answers, so the hook awaits one clock read at most and NEVER the
+  // store.
+  on('ui.message', { element: 'office' }, async ($, e, next) => { // OFFICE_KEY, as a literal: validate reads a matcher statically
+    if (!isOfficeNote(e.data)) return next(e)
+    try {
+      const outage = clientOutage
+      if (noteCloses(outage, DESKTOP.clientFailed)) {
+        // (closed before the await: a second note in the same moment finds no outage, so one outage gives one `up`)
+        clientOutage = null
+        const now = await $.clock.now().catch(() => 0)
+        void logOffice($, { k: 'up', after: now > 0 && outage.since > 0 ? Math.max(0, now - outage.since) : 0, faults: outage.faults }, now)
+      }
+    } catch {
+      // the record is a by-product: the note is answered all the same
+    }
+    return {}
   }).catch(($, e, next) => next(e))
 
   registerUi(on)
