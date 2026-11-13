@@ -930,8 +930,8 @@ test('THE FLICKER GUARD: polls with no visible change write NO payload / scanErr
   const boundary1 = minuteClock(T0) + 60_000
   expect(clock.now()).toBeGreaterThan(boundary1)
   expect(boundary1 - leadMtime).toBeLessThan(60_000)
-  // (the rows carry no clock; the props' minute clock is the mount's still — no publish moved it)
-  expect(((await ui.find({ type: 'Client' }))?.props.props as OfficeProps).nowMin).toBe(minuteClock(T0 + POLL_MS))
+  // (the rows carry no clock, and neither do the props: the minute's turn handed the Client nothing new)
+  expect(await propsJson()).toBe(before)
   await term.unmount()
   const desktop1 = renders()
   await clock.advance(POLL_MS)
@@ -970,10 +970,11 @@ test('THE FLICKER GUARD: polls with no visible change write NO payload / scanErr
   // the minute boundary after the first one moves the lead's timer to "1m" → ONE publish, ONE redraw, then quiet again
   const boundary2 = boundary1 + 60_000
   expect(boundary2).toBeGreaterThan(clock.now())
+  const idleJson = await propsJson()
   await clock.advance(boundary2 - clock.now() + POLL_MS)
   expect(captured.writes.payload).toBe(writes0.payload + 3)
   expect(renders()).toBe(desktop1 + 3)
-  expect(((await ui.find({ type: 'Client' }))?.props.props as OfficeProps).nowMin).toBe(minuteClock(clock.now()))   // the publish moved the props' minute clock
+  expect(await propsJson()).toBe(idleJson)   // the minute's publish redrew the pane and handed the Client the SAME props (no clock rides them)
   await clock.advance(POLL_MS)
   await clock.advance(POLL_MS)
   expect(captured.writes.payload).toBe(writes0.payload + 3)

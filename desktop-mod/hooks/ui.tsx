@@ -544,7 +544,7 @@ export function gridFor(width: number): { perRow: number; cardW: number } {
   return { perRow, cardW }
 }
 
-/** DESKTOP: the clock the agent rows are timed from — the wall-clock minute, so every row's minutes (and so the props) move together, once a minute. */
+/** The wall-clock minute: what the open drawer's minutes are counted from (office-props.ts `elapsedMin`) and what the poll's key times every agent by (renderKey), so all of them turn together, once a minute. The desktop rows draw no minutes, and no clock rides the Client's props. */
 export function minuteClock(now: number): number {
   return Math.floor(now / 60_000) * 60_000
 }
@@ -581,10 +581,15 @@ function rememberReal(seen: Payload): Payload | null {
  * moved (register.tsx): a $.state.set redraws every reader, and on the
  * desktop every redraw of the pane blinks, so a per-tick write WAS the
  * flicker. Time enters at the resolution it is drawn:
- * the elapsed MINUTE (the desktop row's timer; the text surfaces tick their
- * mm:ss from the tick atom instead), the ⏰ long-running flag, and the ⭐ ids
- * still inside the JUST_FINISHED window (`payload.stars`, the poll's stamps)
- * — so a star's expiry and a minute's turn still redraw, once.
+ * the elapsed MINUTE (read on the desktop by the open drawer's status line,
+ * and by the text cards the desktop falls back to — no tick reaches the
+ * desktop, so their mm:ss move with the publishes; the text surfaces tick
+ * their mm:ss from the tick atom instead), the ⏰ long-running flag, and the
+ * ⭐ ids still inside the JUST_FINISHED window (`payload.stars`, the poll's
+ * stamps) — so a star's expiry and a minute's turn still redraw, once. With
+ * the drawer closed a minute's publish hands the office Client the SAME
+ * props (the rows draw no minutes: office-props.ts NO CLOCK RIDES THE PROPS),
+ * so that redraw asks the Client's frame for nothing.
  */
 export function renderKey(payload: Payload, now: number, coarse = false): string {
   const parts: string[] = [payload.demo ? 'D' : 'S', String(payload.oversized)]
@@ -898,7 +903,7 @@ export function registerUi(on: On): void {
     // (counted before its reads: a post's hook that began before them answers no more — THE NEWEST ANSWER)
     if (desktop) officeRenders += 1
     // ONE round of reads (live check 7, R2: they ran one after another, a round trip each, before every draw). The text
-    // surfaces subscribe to the poll's tick so their mm:ss advance; the desktop does NOT (its rows show minutes, and every
+    // surfaces subscribe to the poll's tick so their mm:ss advance; the desktop does NOT (its rows draw no clock at all, and every
     // redraw of it blinks — the tick must never reach it). The clock is the engine's; a host without one (a bare test) falls
     // back to the last time the clock answered, or the scan's own time (never the runtime's wall clock: the hooks keep the
     // engine's one clock)

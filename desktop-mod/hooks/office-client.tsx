@@ -549,7 +549,7 @@ const Office: ClientModule<OfficeProps, OfficeState> = (props, surface) => {
     const wordsHdr = countsOf(true)
     const iconsHdr = countsOf(false)
     const fits = (counts: string, meter: string) => textWidth(counts) + (meter ? 1 + textWidth(meter) : 0) <= fit
-    const full = props.usage ? usageLabel(props.usage, props.lang, props.nowMin) : ''
+    const full = props.usage ? usageLabel(props.usage, props.lang) : ''
     const short = props.usage ? usageShort(props.usage) : ''
     const tiny = props.usage ? usageTiny(props.usage) : ''
     // the placeholder's forms (the probe's `🔍 חיפוש סוכנים`, the glass leading): the label's words (without the trailing ellipsis),

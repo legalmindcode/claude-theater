@@ -3,7 +3,8 @@
 // interfaces" block of the Client office plan; `buildOfficeProps` is the pure
 // builder from the mod's state (the payload with its ⭐ stamps, prefs, view,
 // the room overrides, the walk-in memory, the usage meter, the geometry and
-// the clock — `now` is an input, never Date.now()). Hooks-side only: it
+// the clock — `now` is an input, never Date.now(), read for what is drawn and
+// never handed on: no clock rides the props). Hooks-side only: it
 // imports the office's pure helpers from ui.tsx; the surface module imports
 // just ./office-layout and these types.
 //
@@ -73,7 +74,12 @@ export type OfficeProps = {
   lang: 'he' | 'en'; rtl: boolean
   columns: number; rows: number
   offset: number
-  nowMin: number
+  // (NO CLOCK RIDES THE PROPS, the diagnosis of 13.11: a `nowMin` field rode here, read by nothing that is drawn — usage.ts's
+  // label takes no clock — and every turn of the minute handed the Client new props: one more render the desktop page times at
+  // 2 s, sixty an hour in a resting office. What time moves is carried as what is DRAWN: a row's `longRunning` and `star`, the
+  // drawer's `elapsedMin`. The poll's once-a-minute publish REMAINS (ui.tsx renderKey: the payload write and the pane's redraw);
+  // the gain rests on the desktop page comparing the props' JSON before it sends them to the frame — the page of app build
+  // 5.1231.2.0 does, the engine's contract only implies it — so a redraw with nothing new drawn asks the frame for nothing.)
   counts: { run: number; idle: number; done: number }
   /** (no `still`: the motion toggle is gone — live check 7, Q9; the stored prefs keep the field) */
   prefs: { showDone: boolean; muted: boolean }
@@ -166,9 +172,11 @@ export function assertJson(v: unknown, path = ''): void {
  * each with its cards), the drawer of the selected agent (null when nothing
  * is selected or the selection is gone), the header counts, the empty-office
  * kind, the flags the toolbar shows and the strings it draws. Pure — the
- * same inputs give the same JSON; the clock rides as `nowMin` (the usage
- * meter's reset clock) and the drawer's `elapsedMin`, both at the wall-clock
- * minute, so the props change once a minute, never between.
+ * same inputs give the same JSON. `now` is read for what is drawn and never
+ * handed on: the ⭐ window (`star`), the ⏱ flag (`longRunning`) and the open
+ * drawer's `elapsedMin`, at the wall-clock minute. So the props change only
+ * when the drawn office does: a resting office builds the same JSON at any
+ * hour (office-quiet.test.ts).
  */
 export function buildOfficeProps(input: OfficePropsInput): OfficeProps {
   const { prefs, view, roomDone, now } = input
@@ -252,7 +260,7 @@ export function buildOfficeProps(input: OfficePropsInput): OfficeProps {
     // the count of the agents over the cap leads the footer (short, so a narrow pane still shows it), then the scan notes
     const footer = [dropped > 0 ? L.moreAgentsN(dropped) : '', input.footer ?? ''].filter(Boolean).join(' · ')
     return {
-      v: 1, lang, rtl, columns: input.columns, rows: input.rows, offset: Math.max(0, input.offset), nowMin,
+      v: 1, lang, rtl, columns: input.columns, rows: input.rows, offset: Math.max(0, input.offset),
       counts: headerCounts(office.agents),
       prefs: { showDone: prefs.showDone, muted: prefs.muted },
       search: view.search, selected: view.selected, helpOpen: view.helpOpen, demo: view.demo,

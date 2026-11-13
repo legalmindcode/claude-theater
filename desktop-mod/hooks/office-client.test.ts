@@ -40,7 +40,7 @@ function countsOf(rooms: readonly OfficeRoom[]): OfficeProps['counts'] {
 function props(over: Partial<OfficeProps> = {}): OfficeProps {
   const rooms = over.rooms ?? [room('A', [ag('lead', { emoji: '💼', act: '🧠 חושב' }), ag('a1')])]
   return {
-    v: 1, lang: 'he', rtl: true, columns: 45, rows: 30, offset: 0, nowMin: 100,
+    v: 1, lang: 'he', rtl: true, columns: 45, rows: 30, offset: 0,
     counts: countsOf(rooms), prefs: { showDone: false, muted: true },
     search: '', selected: null, helpOpen: false, demo: false,
     rooms, drawer: null, footer: '', oversized: '', usage: null, empty: null, labels: LABELS, ...over,
@@ -552,7 +552,7 @@ test('render: equal props draw with no setState and no timer; a redraw with the 
   expect(f.setStates()).toBe(1)            // the one init of the local state
   Office(p, f.surface)
   Office({ ...p }, f.surface)
-  expect(JSON.stringify(Office({ ...p, nowMin: p.nowMin + 1 }, f.surface))).toBe(first)
+  expect(JSON.stringify(Office(JSON.parse(JSON.stringify(p)) as OfficeProps, f.surface))).toBe(first)   // a poll's props: a new object, equal JSON
   expect(f.setStates()).toBe(1)
   expect(f.timers).toHaveLength(0)
   expect(f.posts).toHaveLength(0)
@@ -1315,8 +1315,10 @@ test('search: the Input draws the typed text (not props.search) across props upd
   expect(f.debounces()).toHaveLength(2)            // one debounce clock per further keystroke, the earlier one stopped
   expect(f.debounces()[0]!.stopped).toBe(true)
   expect(f.debounces()[1]!.ms).toBe(SEARCH_DEBOUNCE_MS)
-  // a publish lands between keystrokes with the old search: the field keeps 'abc'
-  tree = Office({ ...p, nowMin: p.nowMin + 1 }, f.surface)
+  // a publish lands between keystrokes with the old search: the field keeps 'abc'. (A REAL props change, a row's activity: the
+  // page hands the module nothing for equal props, so a render with them would model no publish)
+  const acted = (q: OfficeProps, act: string): OfficeProps => ({ ...q, rooms: q.rooms.map((r, i) => (i === 0 ? { ...r, agents: r.agents.map((a, j) => (j === 0 ? { ...a, act } : a)) } : r)) })
+  tree = Office(acted(p, '✎ כותב'), f.surface)
   expect(input().props.value).toBe('abc')
   f.tick()
   expect(f.posts).toEqual([{ t: 'search', q: 'a' }, { t: 'search', q: 'abc' }])
@@ -1325,7 +1327,7 @@ test('search: the Input draws the typed text (not props.search) across props upd
   tree = Office({ ...p, search: 'abc' }, f.surface)
   expect(input().props.value).toBe('abc')
   ;(input().props.onInput as (v: string) => void)('abcd')
-  tree = Office({ ...p, search: 'abc', nowMin: 5 }, f.surface)
+  tree = Office(acted({ ...p, search: 'abc' }, '▤ קורא'), f.surface)   // (the older echo arrives on a later publish: another activity)
   expect(input().props.value).toBe('abcd')
   f.tick()
   expect(f.posts[2]).toEqual({ t: 'search', q: 'abcd' })
@@ -1769,7 +1771,7 @@ test('header: one bold Text of the counts in words (`🎭 עובדים 2 · סי
     const slm = sl ? (sl.children as Node[]).filter(n => n.type === 'Text') : []
     return [texts(ts[0]), ts[1] ? texts(ts[1]) : '', slm[0] ? texts(slm[0]) : '']
   }
-  const full = usageLabel(u, 'he', 100)
+  const full = usageLabel(u, 'he')
   const short = usageShort(u)
   // a wide pane: the full label, the bar included, the clock last
   expect(header(120, { usage: u })).toEqual(['🎭 עובדים 2 · סיימו 0', full, ''])
@@ -1853,7 +1855,7 @@ test('header: one bold Text of the counts in words (`🎭 עובדים 2 · סי
   for (const field of [false, true]) {
     for (const counts of countSets) {
       for (const reading of readings) {
-        const fullOf = usageLabel(reading, 'he', 100)
+        const fullOf = usageLabel(reading, 'he')
         const shortOf = usageShort(reading)
         const tinyOf = usageTiny(reading)
         const wordsOf = `🎭 עובדים ${counts.run}${counts.idle ? ` · ממתינים ${counts.idle}` : ''} · סיימו ${counts.done}`
@@ -2070,9 +2072,9 @@ test('THE RENDER COST (the regression guard no load can flake): a drawn row cost
   f.surface.setState({ ...f.surface.state!, focus: 'agent-90' })
   Office(p, f.surface)
   expect(cache.builds).toBe(3)
-  // a poll's props (a new object, equal JSON): nothing; the clock alone (nowMin), the offset, the drawer: nothing of the rooms
+  // a poll's props (a new object, equal JSON): nothing; the offset, the drawer: nothing of the rooms
   Office(JSON.parse(JSON.stringify(p)) as OfficeProps, f.surface)
-  Office({ ...p, nowMin: p.nowMin + 1, offset: 40, drawer: drawer({ id: 'agent-90' }), selected: 'agent-90' }, f.surface)
+  Office({ ...p, offset: 40, drawer: drawer({ id: 'agent-90' }), selected: 'agent-90' }, f.surface)
   expect(cache.builds).toBe(3)
   // one room's agent changes its activity: that room alone
   const q = { ...p, rooms: three.map(r => r.id === 'B' ? { ...r, agents: r.agents.map(a => a.id === 'agent-90' ? { ...a, act: '🔎 מחפש קוד' } : a) } : r) }

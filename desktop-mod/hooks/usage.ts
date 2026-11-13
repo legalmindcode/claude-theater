@@ -1,7 +1,9 @@
 // The five-hour rate-limit window as the footer label draws it. Pure: no
-// imports at all (so a surface module may import it), and no clock of its own —
-// `now` is an input and the reset hour is read through the machine's local
-// getters. The label is one short line: no newline, no bidi control characters,
+// imports at all (so a surface module may import it), and no clock at all —
+// the label is a function of the reading alone (the rounded percent, the
+// window's reset time read through the machine's local getters): nothing in it
+// moves with the time of day, so nothing that draws it is handed a clock.
+// The label is one short line: no newline, no bidi control characters,
 // readable after the plugin-name prefix the desktop footer puts in front of it.
 // `usageShort` is its narrow twin (`⏳ 5h 42%`) for the pane header.
 // Beside it, the pure pieces of register.tsx's usage hooks: when a reading is
@@ -32,8 +34,11 @@ export function resetClock(resetsAt: string): string {
  * `⏳ 5h ▰▰▰▰▱▱▱▱▱▱ 42% · 14:30` — the reset hour in the machine's local time; `⚠` from 80%.
  * Everything in it follows the ROUNDED percent (the bar too), so the label is a function of what
  * sameFiveHour compares: 44.6 and 45 draw the same `45%` and the same bar.
+ * NO CLOCK PARAMETER (the diagnosis of 13.11): a `now` rode here unused, and the office Client's props
+ * carried a minute clock only to feed it — new props every minute for a label that never read them. The
+ * `14:30` is the window's reset time, not a countdown: the same reading draws the same text at any hour.
  */
-export function usageLabel(u: FiveHour, _lang: 'he' | 'en', _now: number): string {
+export function usageLabel(u: FiveHour, _lang: 'he' | 'en'): string {
   const pct = Math.round(u.pct)
   const clock = resetClock(u.resetsAt)
   const when = clock ? ` · ${clock}` : ''

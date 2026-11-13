@@ -64,6 +64,15 @@ PyPI (`pip install claude-theater==0.4.0`) and the latest GitHub release, with i
   while and faulted again starts a wave anew; a subagent starting, or the pane
   being opened, with the wave spent tries it at once; `/theater` still brings
   it back at once. Nothing changed in what the office draws.
+- **A resting desktop office hands its Client nothing new.** The office
+  Client's props carried a minute clock that nothing drawn read, so every turn
+  of the minute sent the Client new props — one more render the desktop page
+  times at two seconds, sixty an hour in an office where nothing moved. The
+  clock is gone from the props: they change only when the drawn office does (an
+  agent arriving or finishing, its activity, the ⏱ flag, the open drawer's
+  minutes, a new five-hour reading). The pane is still redrawn once a minute
+  while an agent's minute turns; the gain rests on the desktop page sending the
+  Client only props that differ. Nothing changed in what the office draws.
 
 ## [0.5.0] - 2026-10-23
 

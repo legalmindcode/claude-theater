@@ -675,9 +675,9 @@ async function takeUsage($: EngineInterface, u: FiveHour | null, first: boolean,
       return
     }
     const l = lang ?? (await read($, prefsAtom).catch(() => DEFAULT_PREFS)).lang
-    const now = await $.clock.now().catch(() => 0)
     if (USAGE.fiveHour !== u) return // a newer reading landed meanwhile: the line and the toast are its own
-    setStatus($, usageLabel(u, l, now))
+    // (no clock is read: the label takes none — usage.ts, it is the reading's alone)
+    setStatus($, usageLabel(u, l))
     await usageToast($, u, l)
   } catch {
     // decoration: never blocks the session
@@ -816,7 +816,8 @@ export const register: Register = on => {
   // the text cards (DESKTOP.clientFailed, read by ui.tsx's render) and the person is told ONCE (the first fault since
   // /theater: `clientTold`). THE WAVES (the diagnosis of 28.10-1.11; model.ts CLIENT_RETRIES): the module never
   // faults on its own data (the kit draws every size without one) — the faults come while the desktop's page is
-  // starved (the app's memory-pressure and stall warnings sit beside 72 of the 85 faults it logged), at every stage
+  // starved (83% of the 93 faults the app logged sit within three minutes of one of its memory-pressure lines, against
+  // 36% of the time the app was running), at every stage
   // the surface times (the frame's shell, its runtime, the module's load, a render past 2 s), in waves that two
   // retries 3 s apart never outlast (live check 8 saw the first: the Client's first draw timing out at the auto-open
   // on the first subagent spawn, with no /theater listed to try again). So the Client is tried again CLIENT_RETRY_MS

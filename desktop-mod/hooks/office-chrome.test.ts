@@ -25,7 +25,7 @@ function propsAt(columns: number): OfficeProps {
   const rooms = [room('A', [ag('lead', { emoji: '💼', act: '🧠 חושב' }), ag('a1')])]
   const all = rooms.flatMap(r => r.agents)
   return {
-    v: 1, lang: 'he', rtl: true, columns, rows: 30, offset: 0, nowMin: 100,
+    v: 1, lang: 'he', rtl: true, columns, rows: 30, offset: 0,
     counts: { run: all.filter(a => a.status === 'running').length, idle: 0, done: 0 }, prefs: { showDone: false, muted: true },
     search: '', selected: null, helpOpen: false, demo: false,
     rooms, drawer: null, footer: '', oversized: '', usage: null, empty: null, labels: LABELS,

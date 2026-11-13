@@ -239,9 +239,10 @@ export const LOGO_MAX_CHARS = 4096
 /**
  * THE CLIENT'S RETRIES (live check 8, 23.10; the diagnosis of 28.10-1.11): the office Client faults while the
  * desktop's page is starved — the module never faults on its own data (the kit draws every size without one), but
- * the surface times every stage (the frame's shell, its runtime, the module's load: 10 s; a render: 2 s), and the
- * app's own memory-pressure and event-loop-stall warnings sit beside 72 of the 85 faults it logged in three weeks
- * (16% of random moments do) — in waves that two retries 3 s apart never outlast, so the text cards stayed for the
+ * the surface times every stage (the frame's shell, its runtime, the module's load: 10 s; a render: 2 s), and 83%
+ * of the 93 faults the app logged sit within three minutes of one of its own memory-pressure lines, against 36% of
+ * the time the app was running (an earlier count, 72 of 85 against 16% of random moments, took its base rate over
+ * hours the app was closed) — in waves that two retries 3 s apart never outlast, so the text cards stayed for the
  * rest of the conversation (live check 8 saw the first of them: the Client's first draw timing out at the auto-open
  * on the first subagent spawn, with no /theater listed to try again). So register.tsx's `ui.fault` hook tries the
  * Client again CLIENT_RETRY_MS after a fault ($.clock.after), the gap doubled per retry up to CLIENT_RETRY_MAX_MS
