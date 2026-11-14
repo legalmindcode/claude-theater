@@ -302,6 +302,51 @@ export function roomStats(all: readonly Agent[]): Map<string, RoomStat> {
   return stat
 }
 
+/**
+ * THE WAVE (spec 2026-11-14 §3): the current run of work of each conversation's subagents, as { done, total } — the room's
+ * progress bar. A wave begins when a subagent starts while none of the conversation's is active (running or waiting) and
+ * ends when none is; a conversation with no active subagent has no wave (no entry). Derived from the payload alone — the
+ * agents' start and end times — so it needs no memory of its own, holds for every open conversation and survives a restart
+ * of the process. The boundary: the earliest start of an active agent, moved back to the start of every finished agent that
+ * began before it and ended after it, until it stops moving; the wave is every agent that began at the boundary or later.
+ * A finished agent's end is `end_ms`, else `mtime_ms`. A working agent with no start time is counted and moves no boundary; a
+ * finished one with no start time is not counted. The lead (`is_session`) is never counted. The percent can fall (new
+ * agents join the total) and never reads 100 (the last finish ends the wave).
+ */
+export function roomWaves(all: readonly Agent[]): Map<string, { done: number; total: number }> {
+  const bySession = new Map<string, Agent[]>()
+  for (const a of all) {
+    if (a.is_session) continue
+    const list = bySession.get(a.session_full)
+    if (list) list.push(a)
+    else bySession.set(a.session_full, [a])
+  }
+  const waves = new Map<string, { done: number; total: number }>()
+  for (const [session, list] of bySession) {
+    const active = list.filter(a => a.status !== 'done')
+    if (active.length === 0) continue
+    let boundary = Infinity
+    for (const a of active) if (typeof a.start_ms === 'number' && a.start_ms < boundary) boundary = a.start_ms
+    const finished: Array<{ start: number; end: number }> = []
+    for (const a of list) {
+      if (a.status !== 'done' || typeof a.start_ms !== 'number') continue
+      finished.push({ start: a.start_ms, end: typeof a.end_ms === 'number' ? a.end_ms : (a.mtime_ms ?? a.start_ms) })
+    }
+    for (let moved = true; moved;) {
+      moved = false
+      for (const f of finished) {
+        if (f.start < boundary && f.end > boundary) {
+          boundary = f.start
+          moved = true
+        }
+      }
+    }
+    const done = finished.filter(f => f.start >= boundary).length
+    waves.set(session, { done, total: active.length + done })
+  }
+  return waves
+}
+
 /** PAGE roomShowsDone(): the room's override, else the global toggle. */
 export function roomShowsDone(roomDone: Readonly<Record<string, boolean>>, showDone: boolean, sess: string): boolean {
   return sess in roomDone ? !!roomDone[sess] : showDone
