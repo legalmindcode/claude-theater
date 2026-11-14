@@ -1017,10 +1017,11 @@ export function registerUi(on: On): void {
     }
     const setSearch = (value: string) => void update($, viewAtom, searchedFor(value))
 
+    // (THE ACTIVE COUNTS: the finished count only while "show finished" is on — office-client.tsx's header, the same rule)
     // --- header: one line. Narrow → the counts alone as icons (the tab already says 🎭); wide → title + worded counts ---
     const countsText = compact
-      ? `${COUNT_ICON.run}${counts.run}` + (counts.idle ? ` ${COUNT_ICON.idle}${counts.idle}` : '') + ` ${COUNT_ICON.done}${counts.done}`
-      : `${COUNT_ICON.run} ${counts.run} ${L.working}` + (counts.idle ? ` · ${COUNT_ICON.idle} ${counts.idle} ${L.idleN}` : '') + ` · ${COUNT_ICON.done} ${counts.done} ${L.finished}`
+      ? `${COUNT_ICON.run}${counts.run}` + (counts.idle ? ` ${COUNT_ICON.idle}${counts.idle}` : '') + (prefs.showDone ? ` ${COUNT_ICON.done}${counts.done}` : '')
+      : `${COUNT_ICON.run} ${counts.run} ${L.working}` + (counts.idle ? ` · ${COUNT_ICON.idle} ${counts.idle} ${L.idleN}` : '') + (prefs.showDone ? ` · ${COUNT_ICON.done} ${counts.done} ${L.finished}` : '')
     // the five-hour meter ends the counts (`· ⏳ 5h 42%`, usage.ts) when it fits whole: a percent cut in half is worse than none
     // (the footer line under the prompt carries the full label on this surface)
     const countsBudget = width - (compact ? 3 : cellWidth(L.appTitle) + 1)

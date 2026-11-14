@@ -26,6 +26,12 @@ function-hooks API, which may change between releases.
 
 ### Changed
 
+- **The office's header counts the active agents.** The count of finished
+  agents — every finished agent of every open conversation in the last three
+  hours, which after a day of workflow runs read "730 finished" over a list of a
+  few working ones — is now drawn only while "show finished" is on, when the
+  list shows them too. Each room's title keeps its own counts, and nothing else
+  in the header moves when the toggle is pressed.
 - **A short fall of the desktop office is no longer announced.** When the app
   drops the office and the mod falls back to the text cards, the toast now waits
   30 seconds and shows only if the office is still down then. On a machine short
