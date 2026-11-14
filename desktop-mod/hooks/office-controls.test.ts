@@ -334,7 +334,8 @@ async function rowsOk(ui: Ui, p: OfficeProps): Promise<void> {
     expect(propsOf(pin).key).toBe(`pin:${String(propsOf(card).key).slice('room:'.length)}`)
     expect(propsOf(title).height).toBe(1)
     expect(textOf(title)).not.toMatch(REFUSED_RE)
-    expect(textOf(counts)).toMatch(/^●\d+/)   // (decision 29: the counts' icons)
+    // (decision 29: the counts' icons — or, while the room's subagents work, THE WAVE: its bar and percent, or the percent alone)
+    expect(textOf(counts)).toMatch(/^(●\d+|[▰▱]{5}.\d+%|\d+%)/)
     for (const row of rowsOf(card)) {
       expect(row.length).toBeGreaterThanOrEqual(3)   // status, who, the emoji; the model, the word and the task when the mode and the width have them
       expect(row.length).toBeLessThanOrEqual(6)
@@ -418,9 +419,13 @@ function suite(COLUMNS: Columns): void {
     const a1 = rowsOf(await cardOf(ui, SA)).find(r => r[1] === whoOf(p0, 'a1'))
     expect(a1).toEqual(a1RowIn(p0, m.mode, 'קורא'))
     expect(await rowKeys(ui, 'a1')).toEqual(['who', ...(W.model === 'none' ? [] : ['model']), 'emoji', ...(W.word ? ['word'] : []), ...(W.task ? ['task'] : [])].map(c => `agent:a1:${c}`))
-    // the room counts: A's ✓ dropped at 36 (the title keeps TITLE_MIN cells), B's ● alone (no finished)
-    expect((await headOf(ui, SA)).counts).toBe(nb(W.countsA))
-    expect((await headOf(ui, SB)).counts).toBe(nb('●1'))
+    // the room counts: both rooms have working subagents, so each title draws THE WAVE (spec 2026-11-14) where its counts
+    // were — the bar and the percent while the title keeps TITLE_MIN cells, else the percent alone (countsFor)
+    for (const s of [SA, SB]) {
+      expect(roomOf(p0, s).wave, s).toBeDefined()
+      expect((await headOf(ui, s)).counts, s).toBe(nb(countsFor(roomOf(p0, s), GEO, true)))
+      expect((await headOf(ui, s)).counts, s).toMatch(/\d+%$/)
+    }
     expect((await headOf(ui, SA)).title).toBe(nb(W.titleA))
     // THE PIN on every title (decision 26): the monochrome PIN_OFF while no room is pinned (the title's cells reserved for it)
     expect([await pinLabelOf(ui, SA), await pinLabelOf(ui, SB)]).toEqual([PIN_OFF, PIN_OFF])
@@ -749,7 +754,7 @@ function suite(COLUMNS: Columns): void {
   t('room counts ✓ are READ-ONLY (live check 7, Q6: the more line under the title is the room\'s one toggle): the title line\'s one control is its pin — the counts a dim Text, no Button; the more line under the title the room\'s Button', async ($, on) => {
     const { ui } = await mountOffice($, on)
     const p0 = await officeProps(ui)
-    expect((await headOf(ui, SA)).counts).toBe(nb(W.countsA))   // (the ✓ dropped at 36)
+    expect((await headOf(ui, SA)).counts).toBe(nb(countsFor(roomOf(p0, SA), GEO, true)))   // (THE WAVE: A's subagents work)
     for (const room of [SA, SB]) {
       const { titleLine, counts } = partsOf(await cardOf(ui, room))
       expect(nodesOf(titleLine).filter(n => n.type === 'Button').map(n => propsOf(n).key), room).toEqual([`pin:${room}`])
@@ -1085,7 +1090,7 @@ function suite(COLUMNS: Columns): void {
     expect(chromeRows(p0)).toBe(FIXED)
     expect(lines.length).toBeGreaterThan(FIXED + BODY)   // taller than the window: the pane scrolls ...
     expect(overscanOf(lines.length, BODY)).toBe(lines.length)   // ... and short enough (WINDOW_ROWS) to be drawn whole at any offset
-    expect((await headOf(ui, SA)).counts).toBe(nb(W.tallA))   // (31 working; the ✓ dropped at 36)
+    expect((await headOf(ui, SA)).counts).toBe(nb(countsFor(roomOf(p0, SA), GEO, true)))   // (31 working: THE WAVE)
     const CHROME_KEYS = W.searchRows === CHROME_ROWS_SEARCH ? ['header', 'toolbar', 'searchLine'] : ['header', 'toolbar']
     const kinds = async () => (await kidsOf(ui)).map(k => (isCard(k) ? 'card' : propsOf(k).key))
     // scrolled 15 lines into A's rows (the engine's offset: the chrome and 15 layout lines): every card still drawn whole, no spacer
@@ -1157,8 +1162,7 @@ function suite(COLUMNS: Columns): void {
     await scrollTo(ui, FIXED + lines.length + CREDIT_ROWS - BODY, BODY)
     const pe = await officeProps(ui)
     await rowsOk(ui, pe)
-    expect((await headOf(ui, SB)).counts).toBe(nb(W.tallB))
-    expect(nb(countsFor(roomOf(pe, SB), GEO, true))).toBe(nb(W.tallB))   // (the drawn counts: the pin's cells reserved, as the model does)
+    expect((await headOf(ui, SB)).counts).toBe(nb(countsFor(roomOf(pe, SB), GEO, true)))   // (the drawn counts — THE WAVE here: the pin's cells reserved, as the model does)
     expect((await headOf(ui, SB)).more).toBe('')
     expect(roomOf(pe, SB).moreLabel).toBe('')
     expect(nodesOf(partsOf(await cardOf(ui, SB)).titleLine).filter(n => n.type === 'Button').map(n => propsOf(n).key)).toEqual([`pin:${SB}`])

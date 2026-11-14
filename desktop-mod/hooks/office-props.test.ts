@@ -230,3 +230,24 @@ test('assertJson throws on undefined anywhere', () => {
   expect(() => assertJson({ a: [{ b: undefined }] })).toThrow(/a\.0\.b/)
   expect(() => assertJson({ a: null, b: [1, 'x', true] })).not.toThrow()
 })
+
+test('THE WAVE rides the room (spec 2026-11-14): a room with a working subagent carries `wave`; a room at rest has no such key; the lead is not counted; a quiet office hands equal props', () => {
+  // one working (since 120 s ago) and two finished that overlapped it; a third finished long before
+  const busy = [
+    agent({ id: 'r1' }),
+    agent({ id: 'd1', status: 'done', start_ms: T0 - 100_000, end_ms: T0 - 50_000 }),
+    agent({ id: 'd2', status: 'done', start_ms: T0 - 90_000, end_ms: T0 - 10_000 }),
+    agent({ id: 'old', status: 'done', start_ms: T0 - 900_000, end_ms: T0 - 800_000 }),
+  ]
+  const p = buildOfficeProps(input(busy))
+  expect(p.rooms[0]?.wave).toEqual({ done: 2, total: 3 })
+  // at rest: no key at all (the room's JSON is what it was before the wave existed)
+  const rest = buildOfficeProps(input([finishedAgent('d1'), finishedAgent('d2', 5)], { prefs: { ...DEFAULT_PREFS, showDone: true } }))
+  expect(rest.rooms[0]).toBeDefined()
+  expect('wave' in rest.rooms[0]!).toBe(false)
+  // the lead alone working: no wave
+  const lead = buildOfficeProps(input([agent({ id: 'lead', is_session: true })]))
+  expect('wave' in lead.rooms[0]!).toBe(false)
+  // THE BUDGET: the same payload five minutes later hands the same props — no clock rides the wave
+  expect(JSON.stringify(buildOfficeProps(input(busy, { now: T0 + 300_000 })).rooms[0]?.wave)).toBe(JSON.stringify(p.rooms[0]?.wave))
+})

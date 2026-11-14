@@ -8,7 +8,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { I18N, hebrewRuleOk } from './i18n'
 import { REFUSED_RE, cleanAgentText } from './office-chrome'
-import { ACT_MAX, BRAND_ACCENT, BRAND_ACCENT_DARK, CARD_BORDER, CARD_LINES, CENTRE_AT, COUNT_ICON, CREDIT, CREDIT_SITE, CREDIT_URL, DOT_FG, EMOJI_CELLS, FAIL_FG, FIT, FOCUS_MARK, HYSTERESIS, LESS_MARK, LINE_FIT, MARK, MODEL_FULL_FROM, MORE_LINES, MORE_MARK, NAME_FLOOR, NAME_MAX, NAME_MIN, GLUE, NBBAR, NBHY, NBSLASH, NBSP, NO_DECOR, ONE_LINE_FROM, PANE_GUTTER, PIN, PIN_OFF, TASK_MAX, TASK_UNITS, TITLE_GAP, TITLE_MIN, WIDE_FROM, capUnits, cardLines, chooseMode, countsFor, countsText, cut, cutTask, cutTitle, cutWords, firstGlyph, fitCells, fitLine, floorsOf, geometry, glyphs, iconLabel, latinDominant, markFg, markOf, modeAt, modelText, nb, needOf, officeModel, officeWidest, restWord, roomCache, rowCount, textWidth, trimWindow, widestKey, widestName } from './office-layout'
+import { WAVE_CELLS, waveText, ACT_MAX, BRAND_ACCENT, BRAND_ACCENT_DARK, CARD_BORDER, CARD_LINES, CENTRE_AT, COUNT_ICON, CREDIT, CREDIT_SITE, CREDIT_URL, DOT_FG, EMOJI_CELLS, FAIL_FG, FIT, FOCUS_MARK, HYSTERESIS, LESS_MARK, LINE_FIT, MARK, MODEL_FULL_FROM, MORE_LINES, MORE_MARK, NAME_FLOOR, NAME_MAX, NAME_MIN, GLUE, NBBAR, NBHY, NBSLASH, NBSP, NO_DECOR, ONE_LINE_FROM, PANE_GUTTER, PIN, PIN_OFF, TASK_MAX, TASK_UNITS, TITLE_GAP, TITLE_MIN, WIDE_FROM, capUnits, cardLines, chooseMode, countsFor, countsText, cut, cutTask, cutTitle, cutWords, firstGlyph, fitCells, fitLine, floorsOf, geometry, glyphs, iconLabel, latinDominant, markFg, markOf, modeAt, modelText, nb, needOf, officeModel, officeWidest, restWord, roomCache, rowCount, textWidth, trimWindow, widestKey, widestName } from './office-layout'
 import type { Line, OfficeDecor, OfficeModel, TableMode } from './office-layout'
 import type { OfficeAgent, OfficeProps, OfficeRoom } from './office-props'
 
@@ -1092,4 +1092,29 @@ test('THE BRAND ACCENTS (decision 28a) and THE CREDIT LINE (decision 27a): the f
   expect(nb(CREDIT)).not.toMatch(REFUSED_RE)
   expect(hebrewRuleOk(CREDIT)).toBe(true)   // (no Hebrew: one Latin run in either pane)
   expect(textWidth(nb(CREDIT))).toBe(textWidth(CREDIT))
+})
+
+test('THE WAVE in the title (spec 2026-11-14): waveText is the bar and the percent, or the percent alone; the bar is never full; countsFor returns the wave in place of the counts, the bar while the title keeps TITLE_MIN cells, else the percent', () => {
+  expect(WAVE_CELLS).toBe(5)
+  expect(waveText({ done: 12, total: 20 }, true)).toBe('▰▰▰▱▱ 60%')
+  expect(waveText({ done: 12, total: 20 }, false)).toBe('60%')
+  expect(waveText({ done: 0, total: 3 }, true)).toBe('▱▱▱▱▱ 0%')
+  expect(waveText({ done: 1, total: 5 }, true)).toBe('▰▱▱▱▱ 20%')
+  expect(waveText({ done: 1, total: 3 }, true)).toBe('▰▱▱▱▱ 33%')     // floor, never rounded up
+  expect(waveText({ done: 199, total: 200 }, true)).toBe('▰▰▰▰▱ 99%') // never five full cells
+  expect(waveText({ done: 0, total: 0 }, true)).toBe('▱▱▱▱▱ 0%')      // (no division by zero)
+  const r = { run: 3, stale: 1, done: 2, wave: { done: 12, total: 20 } }
+  // a wide pane: the bar and the percent; the narrowest pane: the percent alone
+  expect(countsFor(r, atColumn(120), true)).toBe('▰▰▰▱▱ 60%')
+  expect(countsFor(r, atColumn(24), true)).toBe('60%')
+  // one of the two forms at every width, and once the bar fits it fits at every wider pane
+  let seenBar = false
+  for (let W = 24; W <= 120; W++) {
+    const c = countsFor(r, atColumn(W), true)
+    expect(['▰▰▰▱▱ 60%', '60%'], `W ${W}`).toContain(c)
+    if (c !== '60%') seenBar = true
+    else expect(seenBar, `W ${W}: the percent alone after the bar fitted at a narrower pane`).toBe(false)
+  }
+  // no wave: the counts, as ever
+  expect(countsFor({ run: 3, stale: 1, done: 2 }, atColumn(120), true)).toBe('●3 ◌1 ✓2')
 })
