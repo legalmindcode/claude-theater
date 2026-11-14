@@ -24,6 +24,15 @@ function-hooks API, which may change between releases.
 
 ## [Unreleased]
 
+### Changed
+
+- **A short fall of the desktop office is no longer announced.** When the app
+  drops the office and the mod falls back to the text cards, the toast now waits
+  30 seconds and shows only if the office is still down then. On a machine short
+  of memory the office usually draws again by itself within a few seconds, and
+  the toast told of a fall that was already over. The cards still show at once,
+  the automatic retries are unchanged and every fall is still recorded.
+
 ### Added
 
 - **A small permanent record of the desktop office's falls and recoveries.**

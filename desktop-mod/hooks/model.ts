@@ -301,3 +301,11 @@ export const CLIENT_RETRIES = 10
 export const CLIENT_RETRY_MS = 3000
 export const CLIENT_RETRY_MAX_MS = 60_000
 export const CLIENT_ALIVE_GAP_MS = 90_000
+/**
+ * THE QUIET FALL (14.11: ten falls in a day on a machine short of memory, and where the person stayed in the conversation
+ * the office was back by itself in 4, 7, 9 and 10 s — the toast told of a fall that was already over). The person is told
+ * of a fall only when the office is still down CLIENT_QUIET_MS after the fall's first fault: long enough for the first two
+ * retries and the surface's own load wait (3 s + 10 s, then 6 s + 10 s). The text cards show at once all the same, the
+ * retries run as ever and every fault is recorded (office-log.ts); only the telling waits. register.tsx `clientHold`.
+ */
+export const CLIENT_QUIET_MS = 30_000

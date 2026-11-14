@@ -17,7 +17,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Agent } from './model'
-import { CLIENT_RETRY_MS, PANE_ENDED_ASKS, PANE_FORGET_TRIES, PANE_MARKS_MAX, PANE_MARK_TTL_MS, PERSONA_EMOJI, POLL_MS, REOPEN_DELAY_MS, STORE_PANE_PREFIX } from './model'
+import { CLIENT_QUIET_MS, CLIENT_RETRY_MS, PANE_ENDED_ASKS, PANE_FORGET_TRIES, PANE_MARKS_MAX, PANE_MARK_TTL_MS, PERSONA_EMOJI, POLL_MS, REOPEN_DELAY_MS, STORE_PANE_PREFIX } from './model'
 import { OFFICE_LOG_PREFIX, officeLogKey, type OfficeLogEntry } from './office-log'
 import { OFFICE_KEY } from './office-props'
 import { T0, beneath } from './test-kit'
@@ -412,7 +412,27 @@ test('A DELETE THE STORE REFUSED IS TRIED AGAIN on the next polls — the mark o
   expect(captured.writes.scanError).toBe(0)
 })
 
-test('A FALL RIGHT AFTER A REOPEN DOES NOT TOAST: the person did not ask for the pane at that moment — the text cards show, the fall is recorded and the Client is tried again as ever; after a /theater of the person\'s own a fall toasts again', { timeoutMs: 60_000 }, async ($, on) => {
+/**
+ * A FALL THAT LASTS (model.ts CLIENT_QUIET_MS: a fall is told only when the office is still down that long after its first
+ * fault): the Client falls again at every retry — whatever gap the wave is at — until the text cards have shown for the
+ * whole wait. The fall is register.test.ts's: the settings open, then an engine scroll offset past the bound a surface
+ * draws a Box at.
+ */
+async function lastingFall<P>(ui: { find: (q: { type: string }) => Promise<unknown>, redraw: (p: P) => Promise<unknown> }, clock: { advance: (ms: number) => Promise<unknown> }, faulted: P, back: P): Promise<void> {
+  for (let falls = 0; falls < 12; falls++) {
+    await ui.redraw(faulted)
+    await ui.redraw(back)
+    let waited = 0
+    while (waited < CLIENT_QUIET_MS && (await ui.find({ type: 'Client' })) === undefined) {
+      await clock.advance(1000)
+      waited += 1000
+    }
+    if (waited >= CLIENT_QUIET_MS) return
+  }
+  throw new Error('the fall never lasted CLIENT_QUIET_MS')
+}
+
+test('A FALL RIGHT AFTER A REOPEN DOES NOT TOAST: the person did not ask for the pane at that moment — the text cards show, the fall is recorded and the Client is tried again as ever; not even one that lasts; after a /theater of the person\'s own a fall that lasts toasts again', { timeoutMs: 60_000 }, async ($, on) => {
   const { captured, clock } = beneath(on, () => office(), { ...PREFS(), [KEY]: { at: T0 - 3_600_000 } })
   captured.paneOpen = false
   await $.session.start(HOSTED_START)
@@ -435,9 +455,19 @@ test('A FALL RIGHT AFTER A REOPEN DOES NOT TOAST: the person did not ask for the
   expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
   expect(recordOf(captured.store).map(e => e.k)).toEqual(['reopen', 'fault', 'up'])
   expect(captured.toasts).toEqual([])
-  // the person's own /theater: told again at the next fall
+  // ... and a fall that lasts is silent too
+  await lastingFall(ui, clock, { ...PANE.props, scroll: { offset: 20_000, bodyRows: 40 } }, { ...PANE.props })
+  expect(captured.toasts).toEqual([])
+  // the person's own /theater: told again at the next fall that lasts
+  await ui.redraw({ ...PANE.props })
   await $.command.run(THEATER)
+  expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
   await ui.redraw(FAULTED)
+  expect(captured.toasts).toEqual([]) // (not at the fall itself: THE QUIET FALL)
+  await ui.redraw({ ...PANE.props })
+  await $.command.run(THEATER)
+  expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
+  await lastingFall(ui, clock, { ...PANE.props, scroll: { offset: 20_000, bodyRows: 40 } }, { ...PANE.props })
   expect(captured.toasts).toHaveLength(1)
   // (reset: the flag is the plugin bundle's module memory)
   await ui.redraw({ ...PANE.props })
@@ -536,7 +566,7 @@ test('THE PENDING REOPEN YIELDS EVEN WITH THE MARK STILL IN THE STORE: a pane th
   expect(captured.toasts).toEqual([])
 })
 
-test('A REOPEN THE HOST DID NOT TAKE SILENCES NOTHING: the opening rejected, so the person was never shown a pane — when the first subagent then opens the office and it falls, the fall toasts as at any opening', { timeoutMs: 60_000 }, async ($, on) => {
+test('A REOPEN THE HOST DID NOT TAKE SILENCES NOTHING: the opening rejected, so the person was never shown a pane — when the first subagent then opens the office and it falls for long, the fall toasts as at any opening', { timeoutMs: 60_000 }, async ($, on) => {
   const { captured, clock } = beneath(on, () => office(), { ...PREFS(), [KEY]: { at: T0 - 3_600_000 } })
   on('agent.spawn', ($, e) => ({ model: 'haiku', agentId: `live-${e.tool_use_id}` }))
   captured.paneOpen = false
@@ -553,7 +583,7 @@ test('A REOPEN THE HOST DID NOT TAKE SILENCES NOTHING: the opening rejected, so 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
   await ui.press({ key: 'help' })
-  await ui.redraw({ ...PANE.props, scroll: { offset: 20_000, bodyRows: 40 } }) // the fall, as in the test above
+  await lastingFall(ui, clock, { ...PANE.props, scroll: { offset: 20_000, bodyRows: 40 } }, { ...PANE.props }) // the fall, as in the test above
   expect(await ui.find({ type: 'Client' })).toBeUndefined()
   expect(captured.toasts).toHaveLength(1)
   // (reset: the flag is the plugin bundle's module memory)
