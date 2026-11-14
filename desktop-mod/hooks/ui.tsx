@@ -162,7 +162,7 @@ import { UNKNOWN_MODEL_PILL } from './office-svg'
 // the pure chrome maths (the Client's full content height, the search text's cap) and the pure layout's row
 // count: never the surface module itself (office-client.tsx is reached only through the literal `module` path below)
 import { COMPACT_BELOW, cleanSearch, officeHeight } from './office-chrome'
-import { BRAND_ACCENT, COUNT_ICON, CREDIT, CREDIT_URL, DOT_FG, FAIL_FG, LOGO_CELLS, MARK, cutWords, logoMarkdown, nb, rowCount } from './office-layout'
+import { waveText, BRAND_ACCENT, COUNT_ICON, CREDIT, CREDIT_URL, DOT_FG, FAIL_FG, LOGO_CELLS, MARK, cutWords, logoMarkdown, nb, rowCount } from './office-layout'
 import { OFFICE_KEY, buildOfficeProps } from './office-props'
 import type { OfficeProps } from './office-props'
 import { personaFeminine, personaName } from './personas'
@@ -300,6 +300,51 @@ export function roomStats(all: readonly Agent[]): Map<string, RoomStat> {
     if (!v.label || v.label === '—') v.label = roomLabel(a)
   }
   return stat
+}
+
+/**
+ * THE WAVE (spec 2026-11-14 §3): the current run of work of each conversation's subagents, as { done, total } — the room's
+ * progress bar. A wave begins when a subagent starts while none of the conversation's is active (running or waiting) and
+ * ends when none is; a conversation with no active subagent has no wave (no entry). Derived from the payload alone — the
+ * agents' start and end times — so it needs no memory of its own, holds for every open conversation and survives a restart
+ * of the process. The boundary: the earliest start of an active agent, moved back to the start of every finished agent that
+ * began before it and ended after it, until it stops moving; the wave is every agent that began at the boundary or later.
+ * A finished agent's end is `end_ms`, else `mtime_ms`. A working agent with no start time is counted and moves no boundary; a
+ * finished one with no start time is not counted. The lead (`is_session`) is never counted. The percent can fall (new
+ * agents join the total) and never reads 100 (the last finish ends the wave).
+ */
+export function roomWaves(all: readonly Agent[]): Map<string, { done: number; total: number }> {
+  const bySession = new Map<string, Agent[]>()
+  for (const a of all) {
+    if (a.is_session) continue
+    const list = bySession.get(a.session_full)
+    if (list) list.push(a)
+    else bySession.set(a.session_full, [a])
+  }
+  const waves = new Map<string, { done: number; total: number }>()
+  for (const [session, list] of bySession) {
+    const active = list.filter(a => a.status !== 'done')
+    if (active.length === 0) continue
+    let boundary = Infinity
+    for (const a of active) if (typeof a.start_ms === 'number' && a.start_ms < boundary) boundary = a.start_ms
+    const finished: Array<{ start: number; end: number }> = []
+    for (const a of list) {
+      if (a.status !== 'done' || typeof a.start_ms !== 'number') continue
+      finished.push({ start: a.start_ms, end: typeof a.end_ms === 'number' ? a.end_ms : (a.mtime_ms ?? a.start_ms) })
+    }
+    for (let moved = true; moved;) {
+      moved = false
+      for (const f of finished) {
+        if (f.start < boundary && f.end > boundary) {
+          boundary = f.start
+          moved = true
+        }
+      }
+    }
+    const done = finished.filter(f => f.start >= boundary).length
+    waves.set(session, { done, total: active.length + done })
+  }
+  return waves
 }
 
 /** PAGE roomShowsDone(): the room's override, else the global toggle. */
@@ -1177,6 +1222,8 @@ export function registerUi(on: On): void {
     }
 
     // --- rooms (PAGE ensureRoom + the room header): one line each ---
+    // THE WAVE (roomWaves, above): each room's progress bar, from every agent of the office
+    const waves = roomWaves(all)
     const roomBoxes = rooms.map(s => {
       const st = stat.get(s)
       const title = roomTitle(st, s)
@@ -1186,8 +1233,14 @@ export function registerUi(on: On): void {
       const members = order.filter(a => a.session_full === s)
       const chunks: Agent[][] = []
       for (let i = 0; i < members.length; i += perRow) chunks.push(members.slice(i, i + perRow))
-      // (decision 29's icons: the ● drawn green as the card's running mark — the 🟢 it replaces carried its own colour)
-      const countBits = [`${COUNT_ICON.run}${st?.running ?? 0}`, st?.stale ? `${COUNT_ICON.idle}${st.stale}` : '', st?.done ? `${COUNT_ICON.done}${st.done}` : ''].filter(Boolean)
+      // (decision 29's icons: the ● drawn green as the card's running mark — the 🟢 it replaced carried its own colour)
+      // THE WAVE: while the room's subagents work, the bar and the percent take the place of the ● and ◌ counts (the ✓ stays:
+      // it is the room's finished toggle, a Button)
+      const wave = waves.get(s)
+      const waveBit = wave ? waveText(wave, !compact) : ''
+      const countBits = wave
+        ? [waveBit, st?.done ? `${COUNT_ICON.done}${st.done}` : ''].filter(Boolean)
+        : [`${COUNT_ICON.run}${st?.running ?? 0}`, st?.stale ? `${COUNT_ICON.idle}${st.stale}` : '', st?.done ? `${COUNT_ICON.done}${st.done}` : ''].filter(Boolean)
       const countsW = countBits.reduce((n, b) => n + cellWidth(b) + 1, 0)
       // the title is cut by cell count from its own end (never the engine's visual truncation,
       // which in an RTL row cuts an English title's beginning off)
@@ -1203,8 +1256,10 @@ export function registerUi(on: On): void {
               {smallText ? <Text dimColor>{smallText}</Text> : null}
             </Box>
             <Box flexDirection={row} gap={1}>
-              <Text color="green">{countBits[0]}</Text>
-              {st?.stale ? <Text color="yellow">{`${COUNT_ICON.idle}${st.stale}`}</Text> : null}
+              {wave
+                ? <Text dimColor>{waveBit}</Text>
+                : <Text color="green">{countBits[0]}</Text>}
+              {!wave && st?.stale ? <Text color="yellow">{`${COUNT_ICON.idle}${st.stale}`}</Text> : null}
               {st?.done
                 ? <Button key={`rdone:${s}`} plain dimColor={!showing} label={`${COUNT_ICON.done}${st.done}`} onPress={() => void toggleRoomDone(s)} />
                 : null}

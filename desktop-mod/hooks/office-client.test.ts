@@ -14,7 +14,7 @@ import { CHROME_ROWS_MIN, CHROME_ROWS_SEARCH, COMPACT_BELOW, CREDIT_ROWS, DEMO_G
 import * as OfficeClient from './office-client'
 import Office, { DEMO_FG, INPUT_MAX, INPUT_MIN, OUTBOX_FLUSH_MS, OUTBOX_MAX, PAIRS_GAP, SEARCH_DEBOUNCE_MS, TOOLBAR_GAP, inputWidth } from './office-client'
 import type { OfficeState } from './office-client'
-import { BRAND_ACCENT, BRAND_ACCENT_DARK, CARD_BORDER, CENTRE_AT, CREDIT, DOT_FG, FAIL_FG, FIT, FOCUS_MARK, MARK, NBSP, NO_DECOR, ONE_LINE_FROM, PANE_GUTTER, PIN, PIN_OFF, TASK_UNITS, TITLE_GAP, WIDE_FROM, chooseMode, cut, fitCells, fitLine, floorsOf, geometry, nb, officeModel, officeWidest, rowCount, textWidth, trimWindow } from './office-layout'
+import { waveText, BRAND_ACCENT, BRAND_ACCENT_DARK, CARD_BORDER, CENTRE_AT, CREDIT, DOT_FG, FAIL_FG, FIT, FOCUS_MARK, MARK, NBSP, NO_DECOR, ONE_LINE_FROM, PANE_GUTTER, PIN, PIN_OFF, TASK_UNITS, TITLE_GAP, WIDE_FROM, chooseMode, cut, fitCells, fitLine, floorsOf, geometry, nb, officeModel, officeWidest, rowCount, textWidth, trimWindow } from './office-layout'
 import type { OfficeAgent, OfficeDrawer, OfficeMessage, OfficeProps, OfficeRoom } from './office-props'
 import { usageLabel, usageShort, usageTiny } from './usage'
 
@@ -2409,4 +2409,25 @@ test('the settings\' shortcuts from WIDE_FROM: two column pairs side by side (PA
   for (const pair of pairs) for (const col of pair.children as Node[]) for (const cell of cellsOf(col)) expect(texts(cell)).not.toContain(' ')
   expect(byKey(Office(props({ columns: pane(80), selected: 'lead', drawer: drawer() }), fake(pane(80)).surface), 'drawer')!.props.paddingX).toBe(2)
   expect(byKey(Office(props({ columns: pane(79), selected: 'lead', drawer: drawer() }), fake(pane(79)).surface), 'drawer')!.props.paddingX).toBe(1)
+})
+
+test('THE WAVE on the card (spec 2026-11-14): a room with a wave draws the bar and the percent where its counts were — one Text, no row added, no card moved; the room beside it keeps its counts', () => {
+  const rest = props({ columns: pane(60), rooms: [room('A', [ag('a1'), ag('a2')]), room('B', [ag('b1')])] })
+  const wave = { done: 1, total: 4 }
+  const busy = props({ columns: pane(60), rooms: [room('A', [ag('a1'), ag('a2')], { wave }), room('B', [ag('b1')])] })
+  const m0 = officeModel(rest)
+  const m1 = officeModel(busy)
+  expect(m1.rooms[0]!.counts).toBe(nb('▰▱▱▱▱ 25%'))
+  expect(m1.rooms[0]!.counts).toBe(nb(waveText(wave, true)))
+  expect(m1.rooms[1]!.counts).toBe(m0.rooms[1]!.counts)
+  // nothing moves: the same tops, heights and line count with and without the bar
+  expect(m1.rooms.map(r => [r.top, r.height])).toEqual(m0.rooms.map(r => [r.top, r.height]))
+  expect(m1.lines.length).toBe(m0.lines.length)
+  // drawn: the bar is in the tree once, and room A's old counts are not
+  const drawn = JSON.stringify(Office(busy, fake(pane(60)).surface))
+  expect(drawn.split(nb('▰▱▱▱▱ 25%')).length - 1).toBe(1)
+  expect(drawn).not.toContain(m0.rooms[0]!.counts)
+  // a narrow pane: the percent alone
+  const narrow = props({ columns: pane(24), rooms: [room('A', [ag('a1')], { wave })] })
+  expect(officeModel(narrow).rooms[0]!.counts).toBe('25%')
 })

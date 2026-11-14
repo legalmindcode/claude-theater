@@ -58,7 +58,7 @@
 // labelled control (the more / hide line, `עוד 2 שסיימו ◂`) goes through
 // iconLabel, which puts its mark where the reader meets it first.
 
-import type { OfficeAgent, OfficeProps, OfficeRoom } from './office-props'
+import type { OfficeAgent, OfficeProps, OfficeRoom, Wave } from './office-props'
 
 export const EMOJI_CELLS = 2
 /** The caps of the props' texts (office-props.ts cuts to them): a row's name, its activity, the model word, the row's short task. */
@@ -454,14 +454,31 @@ function titleRoom(geo: Geo, counts: string, pinned: boolean): number {
   return geo.inner - 2 - (pinned ? EMOJI_CELLS + TITLE_GAP : 0) - textWidth(counts) - TITLE_GAP
 }
 
+/** The cells of a room's progress bar (the five-hour meter's marks, usage.ts: ▰ full, ▱ empty). */
+export const WAVE_CELLS = 5
+/**
+ * THE WAVE's text (spec 2026-11-14 §4): the bar and the percent (`▰▰▰▱▱ 60%`), or the percent alone. The percent is the
+ * floor of done / total; a cell fills per whole 20% — floored too, so the bar is never full while a wave runs.
+ */
+export function waveText(wave: Wave, bar: boolean): string {
+  const pct = wave.total > 0 ? Math.floor((100 * wave.done) / wave.total) : 0
+  const full = Math.min(WAVE_CELLS - 1, Math.floor(pct / (100 / WAVE_CELLS)))
+  return bar ? `${'▰'.repeat(full)}${'▱'.repeat(WAVE_CELLS - full)} ${pct}%` : `${pct}%`
+}
+
 /**
  * The room's counts, shrunk before the title is (round 8): the non-zero statuses (`●3 ◌1 ✓2`), then without the ✓, then
  * the ● alone — the first form that leaves the title TITLE_MIN fit cells (by FIT), else the shortest. `pinned` reserves the
  * pin's cells beside the title (the model passes true: the pin Button is on every card since decision 26); every caller
  * states it — no default, so a test comparing with the drawn counts never takes the pin-less form by accident (phase B final
- * review).
+ * review). THE WAVE: a room with a wave draws its progress bar here instead — the bar and the percent while the title keeps
+ * TITLE_MIN cells, else the percent alone. Same line, same Text: no row is added or removed.
  */
-export function countsFor(room: Pick<OfficeRoom, 'run' | 'stale' | 'done'>, geo: Geo, pinned: boolean): string {
+export function countsFor(room: Pick<OfficeRoom, 'run' | 'stale' | 'done' | 'wave'>, geo: Geo, pinned: boolean): string {
+  if (room.wave) {
+    const bar = waveText(room.wave, true)
+    return fitCells(titleRoom(geo, bar, pinned)) >= TITLE_MIN ? bar : waveText(room.wave, false)
+  }
   const forms = [countsText(room), countsText({ run: room.run, stale: room.stale, done: 0 }), countsText({ run: room.run, stale: 0, done: 0 })]
   for (const c of forms) if (fitCells(titleRoom(geo, c, pinned)) >= TITLE_MIN) return c
   return forms[2]!

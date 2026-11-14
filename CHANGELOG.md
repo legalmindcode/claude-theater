@@ -41,6 +41,14 @@ function-hooks API, which may change between releases.
 
 ### Added
 
+- **A progress bar on each conversation's card.** While a conversation's
+  subagents are working, its title line shows a bar and a percent — for example
+  `▰▰▰▱▱ 60%` — in place of the small counts: how many subagents of the current
+  run of work have finished, of all that started in it. A run begins when the
+  first subagent starts and ends when none is working or waiting; the bar then
+  gives way to the counts again. The percent can fall when more subagents start
+  (the mod cannot know in advance how many will), and a narrow pane shows the
+  percent alone. No line is added to the card.
 - **A small permanent record of the desktop office's falls and recoveries.**
   When the office falls back to the text cards, and when it draws again, the mod
   now notes it in its own local storage: the time, the conversation's id, the

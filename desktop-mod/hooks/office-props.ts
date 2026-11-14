@@ -27,7 +27,7 @@ import type { Agent, Payload, Prefs, View } from './model'
 import { ACT_MAX, NAME_MAX, cut, cutTask } from './office-layout'
 import { UNKNOWN_MODEL_PILL } from './office-svg'
 import { personaName } from './personas'
-import { RECENT_DONE, agentElapsed, effectivePayload, emptyKind, headerCounts, isLongRunning, minuteClock, officeView, roomShowsDone, roomTitle } from './ui'
+import { RECENT_DONE, agentElapsed, effectivePayload, emptyKind, headerCounts, isLongRunning, minuteClock, officeView, roomShowsDone, roomTitle, roomWaves } from './ui'
 
 /** The Client's key and the `ui.message` matcher. */
 export const OFFICE_KEY = 'office'
@@ -48,9 +48,14 @@ export type OfficeAgent = {
   star: number                                              // detection stamp (the poll's clock) of a just-finished agent inside the ⭐ window, else 0
 }
 
+/** THE WAVE (ui.tsx roomWaves): the room's current run of subagents — how many of it finished, of how many it holds. */
+export type Wave = { done: number; total: number }
+
 export type OfficeRoom = {
   id: string; title: string; small: string; pinned: boolean; showDone: boolean
   run: number; stale: number; done: number
+  /** THE WAVE while the room has one: its title draws the progress bar in place of the counts (office-layout.ts countsFor). Absent at rest — a room with no active subagent carries no such key, so its JSON is what it was. */
+  wave?: Wave
   /** The agents the room draws, in the office's order: the working and waiting, and the finished it shows (all of them, or the RECENT_DONE most recent — ui.tsx officeView). */
   agents: OfficeAgent[]
   /** The finished agents (of the search) the room holds past the ones it draws: 0 when it shows them all. */
@@ -197,6 +202,8 @@ export function buildOfficeProps(input: OfficePropsInput): OfficeProps {
   const office = effectivePayload(input.payload, view, now, input.real ?? null)
   // (the demo's cast obeys the pref as the office does: live check 5 — the demo once forced it on, so the toggle did nothing)
   const showDone = prefs.showDone
+  // THE WAVE (ui.tsx roomWaves): from every agent of the office — the hidden finished ones too, as the rooms' counts are
+  const waves = roomWaves(office.agents)
   const stars = office.stars
   /** The ⭐ stamp of a finished agent while it is alive (inside the just-finished window), else 0. */
   const starOf = (a: Agent): number => {
@@ -252,6 +259,7 @@ export function buildOfficeProps(input: OfficePropsInput): OfficeProps {
         id: s, title: cut(roomTitle(st, s), TITLE_MAX), small: st?.topic ? st.label : (st?.sid ?? s.slice(0, 8)),
         pinned: prefs.pins.includes(s), showDone: shows,
         run: st?.running ?? 0, stale: st?.stale ?? 0, done: st?.done ?? 0,
+        ...(waves.get(s) ? { wave: waves.get(s)! } : {}),
         agents, moreDone: more,
         // THE ONE FINISHED TOGGLE (live check 7, Q6), under the title: only for a room with more finished than the RECENT_DONE it
         // always draws — "N more finished" while it holds them back, "Hide finished" once it shows them all; a room with RECENT_DONE
