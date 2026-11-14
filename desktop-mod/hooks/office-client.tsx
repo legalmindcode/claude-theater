@@ -574,10 +574,15 @@ const Office: ClientModule<OfficeProps, OfficeState> = (props, surface) => {
     //     → no meter. So the meter keeps its place before the words do: the richest pair of (counts, meter) that fits — the words
     //     with the full, the short, or the short on the search line; else the icons with one of those; else the words, else the
     //     icons, with the tiny; else the counts alone. A meter is drawn whole or not at all, never cut in half (`5h 4…` reads as 4%) ---
+    // THE ACTIVE COUNTS (Asaf, 14.11: the header read `730 finished` — every finished agent of every open chat in the last
+    // MAX_AGE_MIN, after a day of workflow runs — over a list of a few working ones): the finished count is drawn only while
+    // the toolbar's "show finished" is on, when the list shows them too; each room's title keeps its own counts. THE LADDER
+    // below is still walked with the finished count in (wordsHdr / iconsHdr): the words-or-icons choice and the meter's place
+    // must not move when the toggle is pressed (live check 7, Q1) — only the finished part comes and goes (`shownCounts`)
     const c = props.counts
     const fit = geo.L
     const part = (icon: string, n: number, label: string, words: boolean): string => (words ? (rtl ? `${label} ${n}` : `${n} ${label}`) : `${icon}${n}`)
-    const countsOf = (words: boolean) => `🎭 ${[part(COUNT_ICON.run, c.run, lbl('working'), words), ...(c.idle ? [part(COUNT_ICON.idle, c.idle, lbl('idleN'), words)] : []), part(COUNT_ICON.done, c.done, lbl('finished'), words)].join(words ? ' · ' : ' ')}`
+    const countsOf = (words: boolean, done = true) => `🎭 ${[part(COUNT_ICON.run, c.run, lbl('working'), words), ...(c.idle ? [part(COUNT_ICON.idle, c.idle, lbl('idleN'), words)] : []), ...(done ? [part(COUNT_ICON.done, c.done, lbl('finished'), words)] : [])].join(words ? ' · ' : ' ')}`
     const wordsHdr = countsOf(true)
     const iconsHdr = countsOf(false)
     const fits = (counts: string, meter: string) => textWidth(counts) + (meter ? 1 + textWidth(meter) : 0) <= fit
@@ -605,11 +610,12 @@ const Office: ClientModule<OfficeProps, OfficeState> = (props, surface) => {
       else if (fits(wordsHdr, tiny)) { counts = wordsHdr; meterHeader = tiny }
       else if (fits(iconsHdr, tiny)) { counts = iconsHdr; meterHeader = tiny }
     }
+    const shownCounts = props.prefs.showDone ? counts : countsOf(counts === wordsHdr, false)
     // (while the demo runs the header's blank line moves under the demo line: the demo line is the first under the header)
     // (THE BRAND ACCENTS, decision 28a: the counts bold in the logo's dark teal — a Text keeps its colour on the desktop, where a
     // Button would lose it; the meter stays dim and uncoloured)
     kids.push(Box({ key: 'header', flexDirection: row, justifyContent: 'space-between', width: '100%', height: 1, overflow: 'hidden', marginBottom: props.demo ? 0 : 1, children: [
-      Text({ bold: true, color: BRAND_ACCENT_DARK, children: [counts] }),
+      Text({ bold: true, color: BRAND_ACCENT_DARK, children: [shownCounts] }),
       ...(meterHeader ? [Text({ dimColor: true, children: [meterHeader] })] : []),
     ] }))
 

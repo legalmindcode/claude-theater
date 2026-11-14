@@ -425,7 +425,7 @@ test('the office draws rooms, cards and counts on every text surface (the footer
   for (const surface of ['terminal', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect((await ui.find({ type: 'Text', text: /משרד הסוכנים/ }))).toBeDefined()
-    expect((await ui.find({ type: 'Text', text: /● 3 עובדים/ }))?.text).toMatch(/✓ 1 סיימו/)
+    expect((await ui.find({ type: 'Text', text: /● 3 עובדים/ }))?.text).not.toMatch(/סיימו/) // (THE ACTIVE COUNTS: "show finished" is off)
     // rooms: A leads with its topic, B with its project; A first (newer activity)
     expect(await ui.find({ type: 'Text', text: /💬 Ship the v2 config migration\./ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /💬 research/ })).toBeDefined()
@@ -479,14 +479,14 @@ test('the pane fits narrow, medium and wide bodies: cards, keys, the compact hea
     expect(await ui.find({ type: 'Text', text: /^00:3\d$/ })).toBeDefined()
     if (bodyColumns < 60) {
       // compact: icon-only header and toolbar, no worded counts, no key-hint chips
-      expect(await ui.find({ type: 'Text', text: /●3 ✓1/ })).toBeDefined()
+      expect(await ui.find({ type: 'Text', text: /^●3( ·|$)/ })).toBeDefined() // (no ✓1: "show finished" is off)
       expect(await ui.find({ type: 'Text', text: /עובדים/ })).toBeUndefined()
       expect((await ui.find({ key: 'showDone' }))?.text).toBe('☐')
       expect((await ui.find({ key: 'lang' }))?.text).toBe('EN')
       expect((await ui.find({ key: 'demo' }))?.text).toBe('🎬')
     } else {
       expect(await ui.find({ type: 'Text', text: /משרד הסוכנים/ })).toBeDefined()
-      expect((await ui.find({ type: 'Text', text: /● 3 עובדים/ }))?.text).toMatch(/✓ 1 סיימו/)
+      expect((await ui.find({ type: 'Text', text: /● 3 עובדים/ }))?.text).not.toMatch(/סיימו/) // (THE ACTIVE COUNTS: "show finished" is off)
       expect((await ui.find({ key: 'showDone' }))?.text).toMatch(/הצג שהושלמו/)
     }
     // the name label is clipped to the card, never wider than it

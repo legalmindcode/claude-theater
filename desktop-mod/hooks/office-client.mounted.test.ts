@@ -147,7 +147,7 @@ test('DESKTOP (2.4): the pane is one Client; it draws the chrome and a card per 
   expect(p0.v).toBe(1)
   expect(p0.rooms.map(r => r.agents.map(a => a.id))).toEqual([['lead', 'a1']])
   await ui.resize({ in: OFFICE_KEY, columns: 45, rows: 30 })
-  expect(await ui.find({ in: OFFICE_KEY, type: 'Text', text: /^🎭 עובדים 2 · סיימו 0$/ }), 'the header').toBeDefined()   // one Text of the counts
+  expect(await ui.find({ in: OFFICE_KEY, type: 'Text', text: /^🎭 עובדים 2$/ }), 'the header').toBeDefined()   // one Text of the counts
   expect(await ui.find({ in: OFFICE_KEY, type: 'Button', key: 'showDone' }), 'showDone').toBeDefined()
   expect(await ui.find({ in: OFFICE_KEY, type: 'Button', key: 'mute' }), 'mute').toBeDefined()
   expect(await ui.find({ in: OFFICE_KEY, type: 'Button', key: 'help' }), 'settings').toBeDefined()

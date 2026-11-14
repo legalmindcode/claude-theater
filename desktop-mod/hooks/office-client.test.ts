@@ -392,7 +392,7 @@ test('render: the chrome (header with the words and a blank line, the toolbar wi
   expect(header).toMatchObject({ type: 'Box', props: { flexDirection: 'row-reverse', justifyContent: 'space-between', height: 1, overflow: 'hidden', marginBottom: 1 } })
   expect(header.children).toHaveLength(1)
   expect((header.children[0] as Node).props.bold).toBe(true)
-  expect(texts(header)).toBe('🎭 עובדים 2 · סיימו 0')
+  expect(texts(header)).toBe('🎭 עובדים 2')   // (THE ACTIVE COUNTS: no finished count while "show finished" is off)
   const keys = all.filter(n => n.type === 'Button').map(n => n.props.key)
   // the chrome's three (the demo and the language live in the settings popover), then the card's: the pin on its title and a
   // Button per value cell, column by column (phase B, decision 26: every click a native Button)
@@ -1826,7 +1826,8 @@ test('header: one bold Text of the counts in words (`🎭 עובדים 2 · סי
   const u = { pct: 42.4, resetsAt: R }
   /** The header's two Texts — the counts and the meter ('' when none) — and the search line's meter ('' when none, or no line). */
   const header = (columns: number, over: Partial<OfficeProps> = {}): [string, string, string] => {
-    const tree = Office(props({ columns: pane(columns), ...over }), fake(pane(columns)).surface)
+    // ("show finished" on, unless the case says otherwise: the finished count is drawn only then — THE ACTIVE COUNTS, below)
+    const tree = Office(props({ columns: pane(columns), prefs: { showDone: true, muted: true }, ...over }), fake(pane(columns)).surface)
     const ts = byKey(tree, 'header')!.children as Node[]
     const sl = byKey(tree, 'searchLine')
     const slm = sl ? (sl.children as Node[]).filter(n => n.type === 'Text') : []
@@ -1834,6 +1835,16 @@ test('header: one bold Text of the counts in words (`🎭 עובדים 2 · סי
   }
   const full = usageLabel(u, 'he')
   const short = usageShort(u)
+  // THE ACTIVE COUNTS (14.11): with "show finished" off the header counts the working and the waiting alone — in words and
+  // in icons — and nothing else moves: the same words-or-icons choice and the same meter in the same place as with it on
+  const OFF = { showDone: false, muted: true }
+  expect(header(120, { usage: u, prefs: OFF })).toEqual(['🎭 עובדים 2', full, ''])
+  expect(header(120, { usage: u, prefs: OFF, counts: { run: 2, idle: 3, done: 730 } })[0]).toBe('🎭 עובדים 2 · ממתינים 3')
+  expect(header(120, { prefs: OFF, counts: { run: 2, idle: 3, done: 730 }, lang: 'en', labels: LABELS_EN, rtl: false })[0]).toBe('🎭 2 working · 3 idle')
+  expect(header(34, { usage: u, prefs: OFF })).toEqual(['🎭 ●2', short, ''])
+  expect(header(31, { usage: u, prefs: OFF, counts: { run: 12, idle: 30, done: 120 } })).toEqual(['🎭 ●12 ◌30', short, ''])
+  expect(header(30, { usage: u, prefs: OFF, counts: { run: 12, idle: 30, done: 120 } })).toEqual(['🎭 ●12 ◌30', '⏳ 42%', ''])
+  expect(header(26, { usage: u, prefs: OFF, counts: { run: 12, idle: 30, done: 120 } })).toEqual(['🎭 ●12 ◌30', '', ''])
   // a wide pane: the full label, the bar included, the clock last
   expect(header(120, { usage: u })).toEqual(['🎭 עובדים 2 · סיימו 0', full, ''])
   expect(full).toContain('⏳ 5h ▰▰▰▰▱▱▱▱▱▱ 42% · 14:30')

@@ -234,7 +234,11 @@ test('R1 · the search field is drawn by the office\'s agents (more than SEARCH_
     await ui.press({ key: 'showDone' })
     const p = await officeProps(ui)
     expect(chromeRows(p), step).toBe(chrome0)
-    expect(await chromeTexts(ui), step).toBe(head0)
+    // (THE ACTIVE COUNTS: the header's finished count is drawn only while the toggle is on — it comes and goes at the end of
+    // the counts' own Text; the words-or-icons choice and the meter's place stay)
+    const head = await chromeTexts(ui)
+    expect(head.replace(/ · סיימו \d+/, ''), step).toBe(head0)
+    expect(/סיימו \d+/.test(head), step).toBe(step === '☑')
     expect(officeModel(p).rooms[0]!.top, step).toBe(top0)
     expect(await ui.find({ in: OFFICE_KEY, type: 'Input', key: 'search' }), step).toBeDefined()
   }
