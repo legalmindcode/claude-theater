@@ -162,7 +162,7 @@ import { UNKNOWN_MODEL_PILL } from './office-svg'
 // the pure chrome maths (the Client's full content height, the search text's cap) and the pure layout's row
 // count: never the surface module itself (office-client.tsx is reached only through the literal `module` path below)
 import { COMPACT_BELOW, cleanSearch, officeHeight } from './office-chrome'
-import { BRAND_ACCENT, COUNT_ICON, CREDIT, CREDIT_URL, DOT_FG, FAIL_FG, LOGO_CELLS, MARK, cutWords, logoMarkdown, nb, rowCount } from './office-layout'
+import { waveText, BRAND_ACCENT, COUNT_ICON, CREDIT, CREDIT_URL, DOT_FG, FAIL_FG, LOGO_CELLS, MARK, cutWords, logoMarkdown, nb, rowCount } from './office-layout'
 import { OFFICE_KEY, buildOfficeProps } from './office-props'
 import type { OfficeProps } from './office-props'
 import { personaFeminine, personaName } from './personas'
@@ -1222,6 +1222,8 @@ export function registerUi(on: On): void {
     }
 
     // --- rooms (PAGE ensureRoom + the room header): one line each ---
+    // THE WAVE (roomWaves, above): each room's progress bar, from every agent of the office
+    const waves = roomWaves(all)
     const roomBoxes = rooms.map(s => {
       const st = stat.get(s)
       const title = roomTitle(st, s)
@@ -1231,8 +1233,14 @@ export function registerUi(on: On): void {
       const members = order.filter(a => a.session_full === s)
       const chunks: Agent[][] = []
       for (let i = 0; i < members.length; i += perRow) chunks.push(members.slice(i, i + perRow))
-      // (decision 29's icons: the ● drawn green as the card's running mark — the 🟢 it replaces carried its own colour)
-      const countBits = [`${COUNT_ICON.run}${st?.running ?? 0}`, st?.stale ? `${COUNT_ICON.idle}${st.stale}` : '', st?.done ? `${COUNT_ICON.done}${st.done}` : ''].filter(Boolean)
+      // (decision 29's icons: the ● drawn green as the card's running mark — the 🟢 it replaced carried its own colour)
+      // THE WAVE: while the room's subagents work, the bar and the percent take the place of the ● and ◌ counts (the ✓ stays:
+      // it is the room's finished toggle, a Button)
+      const wave = waves.get(s)
+      const waveBit = wave ? waveText(wave, !compact) : ''
+      const countBits = wave
+        ? [waveBit, st?.done ? `${COUNT_ICON.done}${st.done}` : ''].filter(Boolean)
+        : [`${COUNT_ICON.run}${st?.running ?? 0}`, st?.stale ? `${COUNT_ICON.idle}${st.stale}` : '', st?.done ? `${COUNT_ICON.done}${st.done}` : ''].filter(Boolean)
       const countsW = countBits.reduce((n, b) => n + cellWidth(b) + 1, 0)
       // the title is cut by cell count from its own end (never the engine's visual truncation,
       // which in an RTL row cuts an English title's beginning off)
@@ -1248,8 +1256,10 @@ export function registerUi(on: On): void {
               {smallText ? <Text dimColor>{smallText}</Text> : null}
             </Box>
             <Box flexDirection={row} gap={1}>
-              <Text color="green">{countBits[0]}</Text>
-              {st?.stale ? <Text color="yellow">{`${COUNT_ICON.idle}${st.stale}`}</Text> : null}
+              {wave
+                ? <Text dimColor>{waveBit}</Text>
+                : <Text color="green">{countBits[0]}</Text>}
+              {!wave && st?.stale ? <Text color="yellow">{`${COUNT_ICON.idle}${st.stale}`}</Text> : null}
               {st?.done
                 ? <Button key={`rdone:${s}`} plain dimColor={!showing} label={`${COUNT_ICON.done}${st.done}`} onPress={() => void toggleRoomDone(s)} />
                 : null}

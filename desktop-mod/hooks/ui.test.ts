@@ -18,11 +18,11 @@ import { assignDistinctPersonas, personaName } from './personas'
 import { demoPayload } from './scanner'
 import {
   CARD_MAX_W, COLS2_FROM, COLS3_FROM, LEAD_MARK, MIN_WIDTH, agentElapsed, cardName, cellWidth, clip, emptyKind, fmt, gridFor,
-  headerCounts, isLongRunning, joinParts, matchesSearch, officeView, paneTitle, roomShowsDone, roomStats, toggledRoomDone, workingCount,
+  headerCounts, isLongRunning, joinParts, matchesSearch, officeView, paneTitle, roomShowsDone, roomWaves, roomStats, toggledRoomDone, workingCount,
   minuteClock, renderKey, starsOf, FINISH_TOAST_MS, RECENT_DONE, TOAST_TITLE_MAX, finishToast, roomTitle,
 } from './ui'
 import { CREDIT_ROWS, REFUSED_RE, chromeRows, emptyLines, fixedRows, helpRows, officeHeight, overlayHeight } from './office-chrome'
-import { CREDIT, CREDIT_SITE, CREDIT_URL, LOGO_ALT, LOGO_CELLS, logoMarkdown, nb, rowCount } from './office-layout'
+import { CREDIT, CREDIT_SITE, CREDIT_URL, LOGO_ALT, LOGO_CELLS, logoMarkdown, nb, rowCount, waveText } from './office-layout'
 import { OFFICE_KEY, assertJson } from './office-props'
 import type { OfficeAgent, OfficeProps } from './office-props'
 import { T0, TEST_HOME, beneath, type MemFiles } from './test-kit'
@@ -1526,4 +1526,21 @@ test('DESKTOP 🎞/🖼 GONE (live check 7, Q9: nothing read it): no still Butto
   const term = await $.ui.mount({ ...PANE, surface: 'terminal', props: { ...PANE.props, bodyColumns: 90 } })
   expect(await term.find({ key: 'still' })).toBeUndefined()
   await term.unmount()
+})
+
+test('THE WAVE on the text cards (spec 2026-11-14): a room with working subagents draws the bar and the percent in its header in place of the ●/◌ counts; the ✓ Button stays', async ($, on) => {
+  const agents = fixture()
+  const { clock } = beneath(on, () => agents, { prefs: { lang: 'he', muted: false, showDone: false, pins: [] } })
+  await $.session.start({ cwd: 'C:/x', surface: 'terminal', isInteractive: true })
+  await clock.advance(POLL_MS)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // every room of the fixture that has a wave draws one Text of the bar and the percent
+  const waves = roomWaves(agents)
+  expect(waves.size).toBeGreaterThan(0)
+  // (the bar and the percent, or the percent alone when this pane's width is the compact one)
+  for (const [, w] of waves) {
+    const drawn = (await ui.find({ type: 'Text', text: waveText(w, true) })) ?? (await ui.find({ type: 'Text', text: waveText(w, false) }))
+    expect(drawn, waveText(w, true)).toBeDefined()
+  }
+  await ui.unmount()
 })
