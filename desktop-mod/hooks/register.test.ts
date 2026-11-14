@@ -23,7 +23,7 @@ import { expect, test } from 'claude-code/testing'
 import type { JsonValue } from 'claude-code'
 
 import type { Agent } from './model'
-import { CLIENT_ALIVE_GAP_MS, CLIENT_RETRIES, CLIENT_RETRY_MAX_MS, CLIENT_RETRY_MS, LOGO_ASSET, PERSONA_EMOJI, POLL_MS } from './model'
+import { CLIENT_ALIVE_GAP_MS, CLIENT_QUIET_MS, CLIENT_RETRIES, CLIENT_RETRY_MAX_MS, CLIENT_RETRY_MS, LOGO_ASSET, PERSONA_EMOJI, POLL_MS } from './model'
 import { SEARCH_MAX } from './office-chrome'
 import { logoMarkdown } from './office-layout'
 import { SEARCH_DEBOUNCE_MS } from './office-client'
@@ -284,7 +284,7 @@ const FAULTED = { ...PANE.props, scroll: { offset: FAULT_OFFSET, bodyRows: 40 } 
 
 // (mounts, faults and redraws through the kit: past the 5 s default under a full suite on a loaded machine with no code change —
 // 5.14 s on 20.10 — the budget is load headroom)
-test('ui.fault on the office: the desktop falls back to the text cards and toasts once (the reason to the debug log); /theater tries the Client again; a second fault toasts again', { timeoutMs: 30_000 }, async ($, on) => {
+test('ui.fault on the office: the desktop falls back to the text cards at once, with nothing told yet (THE QUIET FALL below); /theater tries the Client again; a second fault falls back again', { timeoutMs: 30_000 }, async ($, on) => {
   const logs: string[] = []
   const sinks: Array<string | undefined> = []
   on('ui.log', ($, e) => { logs.push(e.text); sinks.push(e.to); return { value: undefined } })
@@ -304,32 +304,27 @@ test('ui.fault on the office: the desktop falls back to the text cards and toast
   expect((await propsOf(ui)).helpOpen).toBe(true)
   expect((await ui.find({ in: OFFICE_KEY, type: 'Box', key: 'help' }))?.props).toMatchObject({ position: 'absolute', top: 4 })
   await ui.redraw({ ...PANE.props, scroll: { offset: FAULT_OFFSET, bodyRows: 40 } })
-  expect(captured.toasts).toHaveLength(1)
-  expect(captured.toasts[0]).toMatch(/\/theater/)
-  expect(captured.toasts[0]).toMatch(/כרטיסים/) // Hebrew, as the prefs say
-  expect(captured.toastTimeouts).toEqual([undefined]) // its stay the engine's default (live check 5 shortened the finish toast alone)
-  expect(logs.filter(l => l.startsWith('office Client failed'))).toHaveLength(1)
-  expect(logs.find(l => l.startsWith('office Client failed'))).toMatch(/^office Client failed \(render\): .*"top"/)
-  // the fault line goes to the debug log alone, never the transcript (it was the transcript's for live check 4 only: decision 27)
-  expect(sinks[logs.findIndex(l => l.startsWith('office Client failed'))]).toBe('debug')
+  // nothing is told at the fall itself: the toast and the debug line wait CLIENT_QUIET_MS (THE QUIET FALL's own test)
+  expect(captured.toasts).toEqual([])
+  expect(logs.filter(l => l.startsWith('office Client failed'))).toEqual([])
   expect(await ui.find({ type: 'Client' })).toBeUndefined()
   expect(await ui.find({ key: 'open:a1' })).toBeDefined() // the text cards (their help card drawn above them: the view kept)
   expect(await ui.find({ type: 'Text', text: /משרד הסוכנים/ })).toBeDefined()
   // the fallback holds over the redraws (the window back in range) until the automatic retry is due (CLIENT_RETRY_MS; the
-  // next test is the retries' own); no second toast
+  // next test is the retries' own); still nothing told
   await ui.redraw({ ...PANE.props })
   await clock.advance(CLIENT_RETRY_MS - 1)
   expect(await ui.find({ type: 'Client' })).toBeUndefined()
-  expect(captured.toasts).toHaveLength(1)
+  expect(captured.toasts).toEqual([])
   // /theater: the person asks again, before the retry (it drops the pending one) → the Client is drawn again, on the window in range
   await $.command.run(THEATER)
   expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
   expect(await ui.find({ key: 'open:a1' })).toBeUndefined()
   expect((await propsOf(ui)).offset).toBe(0)
   expect((await propsOf(ui)).helpOpen).toBe(true)   // (the settings still open: the popover under the chrome, in range)
-  // it fails again: the cards again, one more toast
+  // it fails again: the cards again
   await ui.redraw({ ...PANE.props, scroll: { offset: FAULT_OFFSET, bodyRows: 40 } })
-  expect(captured.toasts).toHaveLength(2)
+  expect(captured.toasts).toEqual([])
   expect(await ui.find({ type: 'Client' })).toBeUndefined()
   expect(await ui.find({ key: 'open:a1' })).toBeDefined()
   // (reset: the flag is the plugin bundle's module memory)
@@ -387,10 +382,11 @@ test('ui.fault on the office, the retries: the Client is drawn again after a fau
   /** One wave's gaps: CLIENT_RETRY_MS doubled per retry, capped at CLIENT_RETRY_MAX_MS, CLIENT_RETRIES of them. */
   const WAVE = [3000, 6000, 12_000, 24_000, 48_000, 60_000, 60_000, 60_000, 60_000, 60_000]
   expect(WAVE).toHaveLength(CLIENT_RETRIES)
-  // the first fault: told once (toast and debug line); then the whole wave, every retry silent
+  // the first fault: nothing told yet (THE QUIET FALL: each fall of the wave's start is over inside CLIENT_QUIET_MS); the
+  // wave is told once, CLIENT_QUIET_MS into the first gap longer than that (48 s), every other retry silent
   await fault()
-  expect(captured.toasts).toHaveLength(1)
-  expect(failures()).toBe(1)
+  expect(captured.toasts).toEqual([])
+  expect(failures()).toBe(0)
   for (const ms of WAVE) {
     await retry(ms)
     await fault()
@@ -427,14 +423,14 @@ test('ui.fault on the office, the retries: the Client is drawn again after a fau
   await $.command.run(THEATER)
   expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
   await fault()
-  expect(captured.toasts).toHaveLength(2)
-  expect(failures()).toBe(2)
+  expect(captured.toasts).toHaveLength(1)   // (its telling waits CLIENT_QUIET_MS: THE QUIET FALL's own test)
+  expect(failures()).toBe(1)
   // ... a retry still pending when the person runs /theater is dropped: it must not clear a newer fault's flag early
   await clock.advance(CLIENT_RETRY_MS - 1000)
   await $.command.run(THEATER)
   expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
   await fault()
-  expect(captured.toasts).toHaveLength(3)   // (the first fault since /theater, told)
+  expect(captured.toasts).toHaveLength(1)
   await clock.advance(1000)                 // the dropped retry's due time: the newer fault's own is 2000 ms away
   expect(await ui.find({ type: 'Client' })).toBeUndefined()
   await clock.advance(CLIENT_RETRY_MS - 1000)
@@ -459,6 +455,83 @@ test('ui.fault on the office, the retries: the Client is drawn again after a fau
     'fault:1', `up:${CLIENT_RETRY_MS}`,
   ])
   expect(recordOf(captured.store).every(e => e.sid === 'test-session' && (e.k !== 'up' || e.faults === 1))).toBe(true)
+  await ui.unmount()
+})
+
+/**
+ * THE QUIET FALL (model.ts CLIENT_QUIET_MS; register.tsx `clientHold`): the telling of a fall waits. A fall the office
+ * recovers from inside the wait tells nothing; one still not over when the wait ends is told once (the toast, and the
+ * reason to the debug log alone). What the kit cannot stage: a Client drawn by a retry that never posts its mount note (a
+ * pane nobody is drawing) — the kit's fresh Client mounts at once — so the rule "a single fault with its retry in the air
+ * is not told" is read in the hook, not tested.
+ */
+test('THE QUIET FALL: a fall the office comes back from within CLIENT_QUIET_MS shows the text cards and is recorded, but nothing is told (no toast, no debug line); a fall still down CLIENT_QUIET_MS after its first fault is told ONCE, not a millisecond before; later falls are silent until /theater; a /theater inside the wait drops the telling', { timeoutMs: 60_000 }, async ($, on) => {
+  expect(CLIENT_QUIET_MS).toBe(30_000)
+  const logs: string[] = []
+  const sinks: Array<string | undefined> = []
+  on('ui.log', ($, e) => { logs.push(e.text); sinks.push(e.to); return { value: undefined } })
+  const { captured, clock } = beneath(on, () => fixture(), PREFS())
+  await $.session.start({ cwd: 'C:/x', surface: 'desktop', isInteractive: true })
+  await clock.advance(POLL_MS)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'help' })
+  const failures = () => logs.filter(l => l.startsWith('office Client failed'))
+  /** A fault of the Client on screen: the cards at once; then the window back in range. */
+  const fault = async () => {
+    expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
+    await ui.redraw(FAULTED)
+    expect(await ui.find({ type: 'Client' })).toBeUndefined()
+    expect(await ui.find({ key: 'open:a1' })).toBeDefined()
+    await ui.redraw({ ...PANE.props })
+  }
+  // A SHORT FALL: back at the first retry — recorded, never told, however long we then wait
+  await fault()
+  expect(captured.toasts).toEqual([])
+  await clock.advance(CLIENT_RETRY_MS)
+  expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
+  await clock.advance(CLIENT_ALIVE_GAP_MS)
+  expect(captured.toasts).toEqual([])
+  expect(failures()).toEqual([])
+  expect(recordOf(captured.store).map(brief)).toEqual(['fault:1', `up:${CLIENT_RETRY_MS}`])
+  // A FALL THAT LASTS: the Client falls again at every retry, until a retry's gap is longer than the wait (the wave anew
+  // after the rest of CLIENT_ALIVE_GAP_MS above: 3, 6, 12, 24 s — each back and down again inside the wait, each silent — then 48 s)
+  for (const gap of [3000, 6000, 12_000, 24_000]) {
+    await fault()
+    await clock.advance(gap)
+    expect(captured.toasts).toEqual([])
+  }
+  await fault()
+  await clock.advance(CLIENT_QUIET_MS - 1)
+  expect(captured.toasts).toEqual([])
+  expect(failures()).toEqual([])
+  await clock.advance(1)
+  expect(captured.toasts).toHaveLength(1)
+  expect(captured.toasts[0]).toMatch(/\/theater/)
+  expect(captured.toasts[0]).toMatch(/כרטיסים/) // Hebrew, as the prefs say
+  expect(captured.toastTimeouts).toEqual([undefined]) // its stay the engine's default
+  expect(failures()).toHaveLength(1)
+  expect(failures()[0]).toMatch(/^office Client failed \(render\): .*"top"/)
+  expect(sinks[logs.findIndex(l => l.startsWith('office Client failed'))]).toBe('debug') // never the transcript (decision 27)
+  // (the record's reason is that line's, cut)
+  const last = recordOf(captured.store).filter(e => e.k === 'fault').pop() as { why: string }
+  expect(failures()[0]!.length).toBeGreaterThan(last.why.length)
+  expect(failures()[0]).toContain(last.why.slice(0, -1))
+  expect(await ui.find({ type: 'Client' })).toBeUndefined() // the cards still show: the 48 s gap runs
+  // TOLD ONCE: the rest of the wave, and a later fall that lasts, tell nothing more
+  await clock.advance(48_000 - CLIENT_QUIET_MS)
+  await fault()
+  await clock.advance(CLIENT_QUIET_MS * 2)
+  expect(captured.toasts).toHaveLength(1)
+  // /theater: told again at the next fall that lasts — and a /theater inside that fall's wait drops its telling
+  await $.command.run(THEATER)
+  expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
+  await fault()
+  await clock.advance(1000)
+  await $.command.run(THEATER)
+  expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
+  await clock.advance(CLIENT_QUIET_MS * 2)
+  expect(captured.toasts).toHaveLength(1)
+  expect(failures()).toHaveLength(1)
   await ui.unmount()
 })
 
@@ -489,13 +562,10 @@ test('THE RECORD, a fall and its recovery: the first fault writes ONE entry unde
   expect(why.endsWith('…')).toBe(true)
   expect(Array.from(why)).toHaveLength(OFFICE_LOG_WHY_MAX + 1)
   expect(why).not.toMatch(/\s{2}|[\r\n\t]/)
-  const line = logs.find(l => l.startsWith('office Client failed'))!
-  expect(line.length).toBeGreaterThan(why.length)
-  expect(line).toContain(why.slice(0, -1))
-  // ONE store write, of that key; what the person sees is as before (one toast, one debug line); no $.state write
+  // ONE store write, of that key; nothing told yet (THE QUIET FALL: this fall is over inside the wait); no $.state write
   expect(storeSeq(captured, at)).toEqual([`store:${fault.key}`])
-  expect(captured.toasts).toHaveLength(1)
-  expect(logs.filter(l => l.startsWith('office Client failed'))).toHaveLength(1)
+  expect(captured.toasts).toEqual([])
+  expect(logs.filter(l => l.startsWith('office Client failed'))).toEqual([])
   expect(JSON.stringify(captured.writes)).toBe(writes)
   // ... and once it landed nothing is redrawn for it
   await ui.redraw({ ...PANE.props })
@@ -521,7 +591,10 @@ test('THE RECORD, a fall and its recovery: the first fault writes ONE entry unde
   expect(recordOf(captured.store)).toHaveLength(2)
   expect(captured.prefsReads).toBe(drawn)
   expect(JSON.stringify(await propsOf(ui))).toBe(props)
-  expect(captured.toasts).toHaveLength(1)
+  // ... and the fall that was over in CLIENT_RETRY_MS is never told
+  await clock.advance(CLIENT_QUIET_MS)
+  expect(captured.toasts).toEqual([])
+  expect(recordOf(captured.store)).toHaveLength(2)
   await ui.unmount()
 })
 
@@ -587,7 +660,7 @@ test('THE RECORD is bounded: a store that already holds OFFICE_LOG_MAX entries (
   await ui.unmount()
 })
 
-test('THE RECORD never stands in the way, and loses nobody\'s entry: with the fault\'s own store write held (a slow store) the cards are drawn, the toast is up and the Client is back after CLIENT_RETRY_MS, its `up` written; an entry another conversation writes meanwhile is still there when ours lands (one key per entry: a shared list would have overwritten it); with an `up` write held, the outage is closed once and a press is applied meanwhile', { timeoutMs: 30_000 }, async ($, on) => {
+test('THE RECORD never stands in the way, and loses nobody\'s entry: with the fault\'s own store write held (a slow store) the cards are drawn and the Client is back after CLIENT_RETRY_MS, its `up` written; an entry another conversation writes meanwhile is still there when ours lands (one key per entry: a shared list would have overwritten it); with an `up` write held, the outage is closed once and a press is applied meanwhile', { timeoutMs: 30_000 }, async ($, on) => {
   const { captured, clock } = beneath(on, () => fixture(), PREFS())
   await $.session.start({ cwd: 'C:/x', surface: 'desktop', isInteractive: true })
   await clock.advance(POLL_MS)
@@ -600,7 +673,7 @@ test('THE RECORD never stands in the way, and loses nobody\'s entry: with the fa
   await ui.advance(0) // (the fresh Client's second call, and with it its mount note)
   const first = recordOf(captured.store)
   expect(first.map(brief)).toEqual(['fault:1', 'asked', 'up:0'])
-  expect(captured.toasts).toHaveLength(1)
+  expect(captured.toasts).toEqual([])
   const n = countOf(first[2]!.key)
   // THE SLOW STORE: the next fault's write is held beneath (its key built as the writer builds it)
   await clock.advance(10)
@@ -613,7 +686,6 @@ test('THE RECORD never stands in the way, and loses nobody\'s entry: with the fa
   expect(recordOf(captured.store)).toHaveLength(3)             // not landed
   expect(await ui.find({ type: 'Client' })).toBeUndefined()    // the cards, at once
   expect(await ui.find({ key: 'open:a1' })).toBeDefined()
-  expect(captured.toasts).toHaveLength(2)                      // the person told, at once
   // another conversation's process writes an entry of its own meanwhile
   const theirs = officeLogKey(now + 1, 'other-conversation', 1)
   captured.store[theirs] = { t: now + 1, sid: 'other-conversation', k: 'fault', phase: 'load', why: 'x', retry: 1 }
@@ -659,7 +731,7 @@ test('THE RECORD never stands in the way, and loses nobody\'s entry: with the fa
   await ui.unmount()
 })
 
-test('THE RECORD is a by-product: a store that refuses the write loses that entry and nothing else (the cards, the toast, the retry and the later `up` as ever); a conversation id that cannot be read gives an entry naming none, under a well-formed key; a store that cannot list its keys keeps the entry unpruned', { timeoutMs: 30_000 }, async ($, on) => {
+test('THE RECORD is a by-product: a store that refuses the write loses that entry and nothing else (the cards, the retry and the later `up` as ever); a conversation id that cannot be read gives an entry naming none, under a well-formed key; a store that cannot list its keys keeps the entry unpruned', { timeoutMs: 30_000 }, async ($, on) => {
   const { captured, clock } = beneath(on, () => fixture(), PREFS())
   await $.session.start({ cwd: 'C:/x', surface: 'desktop', isInteractive: true })
   await clock.advance(POLL_MS)
@@ -687,7 +759,6 @@ test('THE RECORD is a by-product: a store that refuses the write loses that entr
   captured.hold[officeLogKey(now, 'test-session', n + 1)] = refused
   await fallAndBack()
   expect(captured.seq).toContain('held:' + officeLogKey(now - CLIENT_RETRY_MS, 'test-session', n + 1))
-  expect(captured.toasts).toHaveLength(2)
   expect(recordOf(captured.store).map(brief)).toEqual(['fault:1', `up:${CLIENT_RETRY_MS}`, `up:${CLIENT_RETRY_MS}`])
   n += 2
   // (b) THE CONVERSATION ID cannot be read: the entry names none, its key is still the record's
@@ -699,14 +770,13 @@ test('THE RECORD is a by-product: a store that refuses the write loses that entr
   expect(anon.map(e => `${brief(e)} [${e.sid}]`)).toEqual(['fault:1 []', `up:${CLIENT_RETRY_MS} []`])
   expect(anon[0]!.key).toBe(officeLogKey(now - CLIENT_RETRY_MS, '', n + 1))
   expect(anon[1]!.key).toBe(officeLogKey(now, '', n + 2))
-  expect(captured.toasts).toHaveLength(3)
   // (c) THE STORE cannot list its keys: nothing can be pruned, the entries are kept, nothing throws
   captured.storeKeysDown = true
   await $.command.run(THEATER)
   await fallAndBack()
   captured.storeKeysDown = false
   expect(recordOf(captured.store).slice(5).map(e => `${brief(e)} [${e.sid}]`)).toEqual(['fault:1 [test-session]', `up:${CLIENT_RETRY_MS} [test-session]`])
-  expect(captured.toasts).toHaveLength(4)
+  expect(captured.toasts).toEqual([]) // (short falls all: THE QUIET FALL)
   await ui.unmount()
 })
 

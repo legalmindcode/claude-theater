@@ -157,7 +157,7 @@ import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import { I18N } from './i18n'
 import { liveAgentReturned, liveAged, liveSpawned, liveToolReturned, liveToolStarted, mergeLive, type LiveMap } from './live'
-import { BRAND, CLIENT_ALIVE_GAP_MS, CLIENT_RETRIES, CLIENT_RETRY_MAX_MS, CLIENT_RETRY_MS, COMMAND, DEFAULT_PREFS, DEFAULT_VIEW, DESKTOP, EMPTY_PAYLOAD, LOGO_ASSET, LOGO_MAX_CHARS, PANE_ENDED_ASKS, PANE_FORGET_TRIES, PANE_ID, PANE_MARKS_MAX, POLL_MS, REOPEN_DELAY_MS, STORE_PANE_PREFIX, STORE_PREFS_KEY, STORE_USAGE_TOAST_KEY, USAGE, type Agent, type Payload, type Prefs, type TheaterStatus } from './model'
+import { BRAND, CLIENT_ALIVE_GAP_MS, CLIENT_QUIET_MS, CLIENT_RETRIES, CLIENT_RETRY_MAX_MS, CLIENT_RETRY_MS, COMMAND, DEFAULT_PREFS, DEFAULT_VIEW, DESKTOP, EMPTY_PAYLOAD, LOGO_ASSET, LOGO_MAX_CHARS, PANE_ENDED_ASKS, PANE_FORGET_TRIES, PANE_ID, PANE_MARKS_MAX, POLL_MS, REOPEN_DELAY_MS, STORE_PANE_PREFIX, STORE_PREFS_KEY, STORE_USAGE_TOAST_KEY, USAGE, type Agent, type Payload, type Prefs, type TheaterStatus } from './model'
 import { cleanAgentText } from './office-chrome'
 import { cutWhy, nextOutage, noteCloses, officeLogKey, staleLogKeys, type OfficeLogBody, type Outage } from './office-log'
 import { isOfficeNote } from './office-props'
@@ -626,6 +626,15 @@ let clientRetries = 0
 let clientRetryTimer: Timer | undefined
 let clientLastFaultAt = 0
 let clientTold = false
+/**
+ * THE QUIET FALL (model.ts CLIENT_QUIET_MS): the telling of a fall, held. Armed by a fault while the person was not yet told
+ * and no hold runs; dropped by the mount note of a Client that drew again (the fall is over: nothing is told, and the next
+ * fall is held anew) and by /theater. When it comes due the person is told — the toast and the debug line, `clientTold` —
+ * only if the office is still down: the outage still open AND either the cards show or a second fault came (a single fault
+ * whose retry is in the air, with no mount note yet, is a pane nobody is drawing: the person left the conversation). Not
+ * told then, the next fault arms a hold again. Module memory, like the retries.
+ */
+let clientHold: Timer | undefined
 /**
  * THE RECORD (office-log.ts: what is kept, why one `$.store` key per entry, and what an entry can and cannot prove). THE
  * OUTAGE open now — opened by the first recorded fault, one fault more per recorded fault, closed by THE MOUNT NOTE of a
@@ -1154,6 +1163,8 @@ export const register: Register = on => {
       clientRetryTimer = undefined
       clientRetries = 0
       clientTold = false
+      clientHold?.cancel()
+      clientHold = undefined
       if (DESKTOP.clientFailed) {
         DESKTOP.clientFailed = false
         // THE RECORD: the person asked for the office while the cards showed (never awaited; with the Client up: no entry)
@@ -1175,8 +1186,8 @@ export const register: Register = on => {
 
   // THE OFFICE'S FALLBACK (spec §5): the desktop office Client (key OFFICE_KEY, office-client.tsx) failed — its
   // module did not load, its drawing failed, or its code threw after it drew. From now on the desktop pane draws
-  // the text cards (DESKTOP.clientFailed, read by ui.tsx's render) and the person is told ONCE (the first fault since
-  // /theater: `clientTold`). THE WAVES (the diagnosis of 28.10-1.11; model.ts CLIENT_RETRIES): the module never
+  // the text cards (DESKTOP.clientFailed, read by ui.tsx's render) and the person is told ONCE since /theater (`clientTold`),
+  // and only of a fall still not over CLIENT_QUIET_MS after its first fault (THE QUIET FALL, `clientHold`). THE WAVES (the diagnosis of 28.10-1.11; model.ts CLIENT_RETRIES): the module never
   // faults on its own data (the kit draws every size without one) — the faults come while the desktop's page is
   // starved (83% of the 93 faults the app logged sit within three minutes of one of its memory-pressure lines, against
   // 36% of the time the app was running), at every stage
@@ -1226,13 +1237,25 @@ export const register: Register = on => {
         // THE RECORD: this fall, beside the hook's work (`void`: a slow store holds nothing back)
         clientOutage = nextOutage(clientOutage, now)
         void logOffice($, { k: 'fault', phase: e.phase, why: cutWhy(e.reason), retry }, now)
-        if (!clientTold) {
-          clientTold = true
-          // (the reason to the debug log alone: the transcript carried it for live check 4 only, 18.10 — gone with the release,
-          // decision 27c; the toast below is what the person sees)
-          $.ui.log(`office Client failed (${e.phase}): ${e.reason} [${e.component} ${e.module}]`, { to: 'debug' })
-          const prefs = await read($, prefsAtom)
-          $.ui.toast(`🎭 ${I18N[prefs.lang].officeFailed}`)
+        // THE QUIET FALL: the telling is held CLIENT_QUIET_MS and made only if the office is still down then (`clientHold`)
+        if (!clientTold && clientHold === undefined) {
+          clientHold = $.clock.after(CLIENT_QUIET_MS, () => {
+            clientHold = undefined
+            const outage = clientOutage
+            if (clientTold || outage === null || !(DESKTOP.clientFailed || outage.faults >= 2)) return
+            clientTold = true
+            void (async () => {
+              try {
+                // (the reason of the fall's first fault, to the debug log alone: the transcript carried it for live check 4 only,
+                // 18.10 — gone with the release, decision 27c; the toast is what the person sees)
+                $.ui.log(`office Client failed (${e.phase}): ${e.reason} [${e.component} ${e.module}]`, { to: 'debug' })
+                const prefs = await read($, prefsAtom)
+                $.ui.toast(`🎭 ${I18N[prefs.lang].officeFailed}`)
+              } catch {
+                // the telling is lost; the cards, the retries and the record are not
+              }
+            })()
+          })
         }
         $.ui.invalidate('ui.render')
       }
@@ -1395,6 +1418,9 @@ export const register: Register = on => {
       if (noteCloses(outage, DESKTOP.clientFailed)) {
         // (closed before the await: a second note in the same moment finds no outage, so one outage gives one `up`)
         clientOutage = null
+        // THE QUIET FALL: the office is back before the telling came due — nothing is told
+        clientHold?.cancel()
+        clientHold = undefined
         const now = await $.clock.now().catch(() => 0)
         void logOffice($, { k: 'up', after: now > 0 && outage.since > 0 ? Math.max(0, now - outage.since) : 0, faults: outage.faults }, now)
       }
