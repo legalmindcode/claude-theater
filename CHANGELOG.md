@@ -26,6 +26,19 @@ function-hooks API, which may change between releases.
 
 ### Changed
 
+- **Quiet conversations fold to one line in the desktop office.** A room with
+  no subagent working or waiting folds to its title line two minutes after its
+  last subagent finished, and opens by itself when a subagent starts in it; a
+  room that never had a subagent is folded from the start. A pinned room is not
+  folded. A quiet room's title has a small arrow Button that opens or folds it
+  by hand; the choice is kept (also across restarts) for as long as it differs
+  from what the room would do by itself. While a search is active every room
+  shown is open. A folded room's agents are not sent to the office at all, so a
+  day with many open conversations draws less. The text cards (the terminal, and
+  the desktop while the office is down) are not folded.
+- **Rooms with working subagents sort first.** After the pinned rooms come the
+  rooms with a subagent working or waiting; a conversation whose lead alone is
+  thinking no longer counts as active for the order.
 - **The office's header counts the active agents.** The count of finished
   agents — every finished agent of every open conversation in the last three
   hours, which after a day of workflow runs read "730 finished" over a list of a

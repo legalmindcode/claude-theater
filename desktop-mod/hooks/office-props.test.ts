@@ -6,7 +6,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { I18N, modelFamily } from './i18n'
-import { DEFAULT_PREFS, DEFAULT_VIEW, EMPTY_PAYLOAD, JUST_FINISHED_MS, PERSONA_EMOJI } from './model'
+import { DEFAULT_PREFS, DEFAULT_VIEW, EMPTY_PAYLOAD, FOLD_AFTER_MS, JUST_FINISHED_MS, PERSONA_EMOJI } from './model'
 import type { Agent } from './model'
 import { DRAWER_TEXT_TIGHT, MAX_PROPS_AGENTS, PROPS_BUDGET, PROPS_MAX_CHARS, assertJson, buildOfficeProps } from './office-props'
 import type { OfficePropsInput } from './office-props'
@@ -195,11 +195,13 @@ test('THE PROPS BUDGET: an office that is heavy per agent (a room each, uncapped
     id: `agent-${String(i).padStart(94, '0')}`, role: 'r'.repeat(80), model: `claude-${'x'.repeat(60)}`,
     session_full: `sess-${String(i).padStart(95, '0')}`, session: `s${i}`, topic: 't'.repeat(90), is_session: true,
   }))
+  // (every room open: THE FOLD would fold a room that holds its lead alone — the folded office's budget is its own test, below)
+  const shownOpen = { ...shown, folds: Object.fromEntries(heavy.map(a => [a.session_full, 'open' as const])) }
   // heavy indeed: one more agent (and its room) costs more than the budget shared by MAX_PROPS_AGENTS
-  const sizeOf = (n: number) => JSON.stringify(buildOfficeProps(input(heavy.slice(0, n), { prefs: shown }))).length
+  const sizeOf = (n: number) => JSON.stringify(buildOfficeProps(input(heavy.slice(0, n), { prefs: shownOpen }))).length
   expect(sizeOf(2) - sizeOf(1)).toBeGreaterThan(PROPS_BUDGET / MAX_PROPS_AGENTS)
   const selected = heavy[5]!.id
-  const p = buildOfficeProps(input(heavy, { prefs: shown, view: { ...DEFAULT_VIEW, selected } }))
+  const p = buildOfficeProps(input(heavy, { prefs: shownOpen, view: { ...DEFAULT_VIEW, selected } }))
   expect(JSON.stringify(p).length).toBeLessThanOrEqual(PROPS_BUDGET)
   expect(p.drawer?.id).toBe(selected)
   expect(p.drawer!.task.length).toBeLessThanOrEqual(DRAWER_TEXT_TIGHT + 1) // cut (an ellipsis ends it)
@@ -208,9 +210,17 @@ test('THE PROPS BUDGET: an office that is heavy per agent (a room each, uncapped
   expect(carried).toBeLessThan(MAX_PROPS_AGENTS)
   expect(p.footer).toBe(I18N.he.moreAgentsN(300 - carried))
   // the same office without a selection: no drawer text to shed, fewer agents straight away; still under the budget
-  const q = buildOfficeProps(input(heavy, { prefs: shown }))
+  const q = buildOfficeProps(input(heavy, { prefs: shownOpen }))
   expect(JSON.stringify(q).length).toBeLessThanOrEqual(PROPS_BUDGET)
   expect(q.footer).toBe(I18N.he.moreAgentsN(300 - q.rooms.flatMap(r => r.agents).length))
+  // THE FOLD: the same 300 conversations with no choice made are 300 quiet rooms — each folded, none with an agent to shed —
+  // and the cap bounds them too: under the budget, fewer rooms than conversations, nothing of an agent carried
+  const folded = buildOfficeProps(input(heavy, { prefs: shown }))
+  expect(JSON.stringify(folded).length).toBeLessThanOrEqual(PROPS_BUDGET)
+  expect(folded.rooms.length).toBeGreaterThan(0)
+  expect(folded.rooms.length).toBeLessThan(300)
+  expect(folded.rooms.every(r => r.folded === true && r.agents.length === 0)).toBe(true)
+  expect(folded.footer).toBe('')
 })
 
 test('THE TOO-LONG CONVERSATIONS NOTE (live check 6): the oversized count of the payload rides the props as the note of the settings popover (i18n oversizedN in the language), never the footer; none while the count is 0 or the demo runs (its own office)', () => {
@@ -250,4 +260,46 @@ test('THE WAVE rides the room (spec 2026-11-14): a room with a working subagent 
   expect('wave' in lead.rooms[0]!).toBe(false)
   // THE BUDGET: the same payload five minutes later hands the same props — no clock rides the wave
   expect(JSON.stringify(buildOfficeProps(input(busy, { now: T0 + 300_000 })).rooms[0]?.wave)).toBe(JSON.stringify(p.rooms[0]?.wave))
+})
+
+test('THE FOLD in the props (spec 2026-11-15): a quiet room rides folded with no agents FOLD_AFTER_MS after its last subagent finished — to the millisecond; before that it is open and can be folded; a pin, the person\'s choice, a wave and a search each decide as the rule says', () => {
+  const lead = agent({ id: 'lead', is_session: true, status: 'stale', tool: '', phase: 'thinking' })
+  const shown = { ...DEFAULT_PREFS, showDone: true }
+  const quiet = [lead, finishedAgent('d1', 180), finishedAgent('d2', 300)]   // the last finished three minutes ago
+  const p = buildOfficeProps(input(quiet, { prefs: shown }))
+  expect(p.rooms).toHaveLength(1)
+  expect(p.rooms[0]).toMatchObject({ id: 'sess-aaaa', folded: true, agents: [], moreDone: 0, moreLabel: '', run: 0, stale: 1, done: 2 })
+  expect('foldable' in p.rooms[0]!).toBe(false)
+  expect(p.counts).toEqual({ run: 0, idle: 1, done: 2 })   // the header counts the office, folded or not
+  expect(p.footer).toBe('')                                // a folded room's agents are not "left out"
+  // one minute after the last finish: open, with the Button that folds it
+  const fresh = [lead, finishedAgent('d1', 60)]
+  const open = buildOfficeProps(input(fresh, { prefs: shown }))
+  expect('folded' in open.rooms[0]!).toBe(false)
+  expect(open.rooms[0]!.foldable).toBe(true)
+  expect(open.rooms[0]!.agents.map(a => a.id)).toEqual(['lead', 'd1'])
+  // ... to the millisecond: the fold comes FOLD_AFTER_MS after the finish, not before
+  const at = (ms: number) => buildOfficeProps(input(fresh, { prefs: shown, now: T0 - 60_000 + ms })).rooms[0]!
+  expect(at(FOLD_AFTER_MS - 1).folded).toBeUndefined()
+  expect(at(FOLD_AFTER_MS).folded).toBe(true)
+  // a lead alone (no subagent ever): folded
+  expect(buildOfficeProps(input([lead])).rooms[0]).toMatchObject({ folded: true, agents: [] })
+  // a pinned quiet room stays open; the person's choice wins both ways
+  const pinned = buildOfficeProps(input(quiet, { prefs: { ...shown, pins: ['sess-aaaa'] } })).rooms[0]!
+  expect([pinned.folded, pinned.foldable, pinned.agents.length]).toEqual([undefined, true, 3])
+  const byHandOpen = buildOfficeProps(input(quiet, { prefs: { ...shown, folds: { 'sess-aaaa': 'open' } } })).rooms[0]!
+  expect([byHandOpen.folded, byHandOpen.foldable, byHandOpen.agents.length]).toEqual([undefined, true, 3])
+  const byHandClosed = buildOfficeProps(input(quiet, { prefs: { ...shown, pins: ['sess-aaaa'], folds: { 'sess-aaaa': 'closed' } } })).rooms[0]!
+  expect([byHandClosed.folded, byHandClosed.agents.length]).toEqual([true, 0])
+  // a wave: open, and neither key — the card of a room at work is what it was before the fold existed
+  const working = buildOfficeProps(input([lead, agent({ id: 'r1' }), finishedAgent('d1', 300, { start_ms: T0 - 600_000 })], { prefs: shown })).rooms[0]!
+  expect('folded' in working || 'foldable' in working).toBe(false)
+  expect(working.wave).toEqual({ done: 0, total: 1 })
+  // ... but closed by hand it stays folded through a wave, its bar still on the title
+  const closedAtWork = buildOfficeProps(input([lead, agent({ id: 'r1' })], { prefs: { ...shown, folds: { 'sess-aaaa': 'closed' } } })).rooms[0]!
+  expect(closedAtWork).toMatchObject({ folded: true, agents: [], wave: { done: 0, total: 1 } })
+  // a search opens the room (its matches would be hidden) and draws no fold Button
+  const found = buildOfficeProps(input(quiet, { prefs: { ...shown, folds: { 'sess-aaaa': 'closed' } }, view: { ...DEFAULT_VIEW, search: 'x' } })).rooms[0]!
+  expect('folded' in found || 'foldable' in found).toBe(false)
+  expect(found.agents.length).toBeGreaterThan(0)
 })

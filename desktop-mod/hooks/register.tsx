@@ -561,8 +561,13 @@ export async function poll($: EngineInterface): Promise<void> {
       const roomsChanged = prevRooms.size === 0 || [...prevRooms].some(s => !liveRooms.has(s))
       if (roomsChanged && error === undefined && office.agents.length > 0 && !office.demo) {
         prefs ??= await read($, prefsAtom)
-        if (prefs.pins.some(s => !liveRooms.has(s))) {
-          const saved = await update($, prefsAtom, p => ({ ...p, pins: p.pins.filter(s => liveRooms.has(s)) }))
+        // (THE FOLD's choices go with the pins: one prefs write for both)
+        if (prefs.pins.some(s => !liveRooms.has(s)) || Object.keys(prefs.folds ?? {}).some(s => !liveRooms.has(s))) {
+          const saved = await update($, prefsAtom, p => {
+            const { folds: old, ...rest } = p
+            const folds = Object.fromEntries(Object.entries(old ?? {}).filter(([s]) => liveRooms.has(s)))
+            return { ...rest, pins: p.pins.filter(s => liveRooms.has(s)), ...(Object.keys(folds).length > 0 ? { folds } : {}) }
+          })
           await $.store.set(STORE_PREFS_KEY, saved).catch(() => undefined)
         }
         const roomDone = parseRoomDone(await $.store.get(STORE_ROOM_DONE_KEY).catch(() => undefined))
@@ -1031,6 +1036,14 @@ async function loadLogo($: EngineInterface): Promise<void> {
   }
 }
 
+/** THE FOLD (spec 2026-11-15): the stored choices as the prefs carry them — `{ folds }` of the well-formed entries ('open' / 'closed' by a string id), or nothing at all when there is none (prefs stored before the fold existed stay as they were). */
+function storedFolds(stored: unknown): { folds?: Record<string, 'open' | 'closed'> } {
+  if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) return {}
+  const folds: Record<string, 'open' | 'closed'> = {}
+  for (const [k, v] of Object.entries(stored as Record<string, unknown>)) if (v === 'open' || v === 'closed') folds[k] = v
+  return Object.keys(folds).length > 0 ? { folds } : {}
+}
+
 /** Prefs from $.store, defaults filled in; a bad value falls back to the default. */
 async function loadPrefs($: EngineInterface): Promise<Prefs> {
   try {
@@ -1041,6 +1054,8 @@ async function loadPrefs($: EngineInterface): Promise<Prefs> {
       showDone: stored?.showDone === true,
       still: stored?.still === true,
       pins: Array.isArray(stored?.pins) ? stored.pins.filter(p => typeof p === 'string') : [],
+      // THE FOLD (spec 2026-11-15): the rooms opened or folded by hand — only well-formed entries, and no key at all when none
+      ...storedFolds(stored?.folds),
     }
   } catch {
     return DEFAULT_PREFS

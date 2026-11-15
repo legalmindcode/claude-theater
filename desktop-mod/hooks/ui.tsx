@@ -156,7 +156,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
 import { ACT_GLYPH, I18N, activityLabel, dirOf, modelLabel, type Lang, type Strings } from './i18n'
-import { BRAND, DEFAULT_PREFS, DEFAULT_VIEW, DESKTOP, EMPTY_PAYLOAD, JUST_FINISHED_MS, LONG_RUNNING_MS, PANE_ID, STORE_PREFS_KEY, USAGE, personaIndex } from './model'
+import { BRAND, DEFAULT_PREFS, DEFAULT_VIEW, DESKTOP, EMPTY_PAYLOAD, FOLD_AFTER_MS, JUST_FINISHED_MS, LONG_RUNNING_MS, PANE_ID, STORE_PREFS_KEY, USAGE, personaIndex } from './model'
 import type { Agent, Payload, Prefs, TheaterStatus, View } from './model'
 import { UNKNOWN_MODEL_PILL } from './office-svg'
 // the pure chrome maths (the Client's full content height, the search text's cap) and the pure layout's row
@@ -347,6 +347,36 @@ export function roomWaves(all: readonly Agent[]): Map<string, { done: number; to
   return waves
 }
 
+/**
+ * THE FOLD (spec 2026-11-15 §3): the moment each conversation fell quiet — the latest end of its finished subagents (`end_ms`,
+ * else `mtime_ms`). No entry for a conversation with no finished subagent. The lead (`is_session`) is skipped: a lead that
+ * is thinking, or that ended a turn, says nothing about the room's subagents.
+ */
+export function roomQuietSince(all: readonly Agent[]): Map<string, number> {
+  const quiet = new Map<string, number>()
+  for (const a of all) {
+    if (a.is_session || a.status !== 'done') continue
+    const end = typeof a.end_ms === 'number' ? a.end_ms : (a.mtime_ms ?? 0)
+    if (end > (quiet.get(a.session_full) ?? 0)) quiet.set(a.session_full, end)
+  }
+  return quiet
+}
+
+/**
+ * THE FOLD, the rule (spec 2026-11-15 §3), in its order: a search opens every room shown (each holds a match, and a folded
+ * room would hide it); the person's own choice for the room — `open` or `closed` — wins over all that follows; a pinned
+ * room is open; a room with a wave (roomWaves: a subagent working or waiting) is open; a room whose last subagent finished
+ * less than FOLD_AFTER_MS ago is open; every other room is folded — a room that never had a subagent too. Pure: the caller
+ * hands the clock, and the answer changes once, when the room crosses FOLD_AFTER_MS.
+ */
+export function roomFolded(i: { search: string; choice: 'open' | 'closed' | undefined; pinned: boolean; wave: boolean; quietSince: number | undefined; now: number }): boolean {
+  if (i.search.trim() !== '') return false
+  if (i.choice === 'open') return false
+  if (i.choice === 'closed') return true
+  if (i.pinned || i.wave) return false
+  return i.quietSince === undefined || i.now - i.quietSince >= FOLD_AFTER_MS
+}
+
 /** PAGE roomShowsDone(): the room's override, else the global toggle. */
 export function roomShowsDone(roomDone: Readonly<Record<string, boolean>>, showDone: boolean, sess: string): boolean {
   return sess in roomDone ? !!roomDone[sess] : showDone
@@ -436,12 +466,14 @@ export function officeView(
   const visible = searched.filter(a => !a.closed && (a.status !== 'done' || roomShowsDone(roomDone, showDone, a.session_full) || kept.has(a.id)))
   const rooms = [...new Set(visible.map(a => a.session_full))]
   const pinned = new Set(pins)
+  const waves = roomWaves(all)
   rooms.sort((x, y) => {
     const sx = stat.get(x)
     const sy = stat.get(y)
     return (
       (pinned.has(y) ? 1 : 0) - (pinned.has(x) ? 1 : 0) ||
-      ((sy?.running ?? 0) > 0 ? 1 : 0) - ((sx?.running ?? 0) > 0 ? 1 : 0) ||
+      // THE ORDER (spec 2026-11-15 §5): the rooms with a wave — a SUBAGENT working or waiting; the lead's own work no longer counts
+      (waves.has(y) ? 1 : 0) - (waves.has(x) ? 1 : 0) ||
       (sy?.mtime ?? 0) - (sx?.mtime ?? 0)
     )
   })
@@ -651,6 +683,11 @@ export function renderKey(payload: Payload, now: number, coarse = false): string
   }
   const alive = Object.entries(payload.stars).filter(([, t]) => now - t < JUST_FINISHED_MS).map(([id]) => id).sort()
   parts.push(alive.join(','))
+  // THE FOLD (spec 2026-11-15 §7): the rooms whose quiet FOLD_AFTER_MS have passed — so a room that crosses them is redrawn,
+  // once, folded (the rule's other inputs — the search, the choice, the pin — are state writes of their own)
+  const waving = roomWaves(payload.agents)
+  const rested = [...roomQuietSince(payload.agents)].filter(([s, t]) => !waving.has(s) && now - t >= FOLD_AFTER_MS).map(([s]) => s).sort()
+  parts.push(rested.join(','))
   return parts.join('\u0002')
 }
 
@@ -740,6 +777,14 @@ async function setDemo($: EngineInterface, on: boolean): Promise<View> {
 const flipShowDone = (p: Prefs): Prefs => ({ ...p, showDone: !p.showDone })
 const flipMuted = (p: Prefs): Prefs => ({ ...p, muted: !p.muted })
 const flipPin = (room: string) => (p: Prefs): Prefs => ({ ...p, pins: p.pins.includes(room) ? p.pins.filter(x => x !== room) : [...p.pins, room] })
+/** THE FOLD: the person's choice for `room` set to `to`, or dropped (undefined: the room follows the rule again); `folds` leaves the prefs with its last entry. */
+const setFold = (room: string, to: 'open' | 'closed' | undefined) => (p: Prefs): Prefs => {
+  const folds: Record<string, 'open' | 'closed'> = { ...(p.folds ?? {}) }
+  if (to === undefined) delete folds[room]
+  else folds[room] = to
+  const { folds: _old, ...rest } = p
+  return Object.keys(folds).length > 0 ? { ...rest, folds } : rest
+}
 /** The settings popover opened or closed — and an open drawer closed with it (live check 7, Q2: the settings replace the drawer, and closing them brings no old drawer back). */
 const flipHelp = (v: View): View => ({ ...v, helpOpen: !v.helpOpen, selected: null })
 /**
@@ -856,6 +901,23 @@ async function applyOfficeAction($: EngineInterface, data: unknown): Promise<App
       return wrote(await savePrefs($, flipMuted))
     case 'pin':
       return typeof m.room === 'string' ? wrote(await savePrefs($, flipPin(m.room))) : NOTHING
+    case 'fold': {
+      // THE FOLD (spec 2026-11-15): the room opened or folded by hand. What the press asks for (`to`) is kept as the person's
+      // choice only where the rule alone would not give it; where it would — a hand-opened room folded again once it is
+      // quiet, a hand-folded room opened again while its subagents work — the choice is DROPPED, so the room goes back to
+      // folding and opening by itself. A press that asks for what is already so writes nothing
+      const to = (m as { to?: unknown }).to
+      if (typeof m.room !== 'string' || (to !== 'open' && to !== 'closed')) return NOTHING
+      const room = m.room
+      const [prefs, payload, view, clock] = await Promise.all([read($, prefsAtom), read($, payloadAtom), read($, viewAtom), $.clock.now().catch(() => null)])
+      const now = clock ?? Math.max(clockSeen, payload.scanned_ms)
+      const agents = effectivePayload(payload, view, now, rememberReal(payload)).agents
+      const about = { search: '', pinned: prefs.pins.includes(room), wave: roomWaves(agents).has(room), quietSince: roomQuietSince(agents).get(room), now }
+      const byRule = roomFolded({ ...about, choice: undefined }) ? 'closed' : 'open'
+      const next = byRule === to ? undefined : to
+      if (prefs.folds?.[room] === next) return NOTHING
+      return wrote(await savePrefs($, setFold(room, next)))
+    }
     case 'lang':
       return wrote(await setLang($, otherLang((await read($, prefsAtom)).lang)))
     case 'help':

@@ -2431,3 +2431,30 @@ test('THE WAVE on the card (spec 2026-11-14): a room with a wave draws the bar a
   const narrow = props({ columns: pane(24), rooms: [room('A', [ag('a1')], { wave })] })
   expect(officeModel(narrow).rooms[0]!.counts).toBe('25%')
 })
+
+test('THE FOLD in the layout (spec 2026-11-15): a folded card is its frame and its title line — border, pad, title, pad, border, gap; no blank line, no more line, no row — and rowCount counts it so; the fold Button takes its cells from a quiet room\'s title only: a room at work keeps its whole title', () => {
+  const long = 'בדיקת תיאטרון הסוכנים בשיחה חדשה עם כמה סוכני משנה במקביל'
+  const rooms = [
+    room('A', [ag('a1'), ag('a2')], { title: long }),                                            // at work: no fold Button
+    room('B', [], { title: long, folded: true, run: 0, stale: 1, done: 5 }),                     // folded
+    room('C', [ag('c1', { status: 'done' })], { title: long, foldable: true }),                  // quiet and open
+  ]
+  const p = props({ columns: pane(51), rooms })
+  const m = officeModel(p)
+  expect(m.rooms.map(r => [r.id, r.folded, r.foldTo])).toEqual([['A', false, null], ['B', true, 'open'], ['C', false, 'closed']])
+  const B = m.rooms[1]!
+  expect(m.lines.slice(B.top, B.top + B.height).map(l => l.kind)).toEqual(['border', 'pad', 'title', 'pad', 'border', 'gap'])
+  expect([B.rows.length, B.more, B.blankAt, B.moreAt]).toEqual([0, '', -1, -1])
+  expect(B.counts).toBe(nb('●0 ◌1 ✓5'))
+  expect(rowCount(p)).toBe(m.lines.length)
+  // a room at work: the title it had before the fold existed (the same props without the two quiet rooms' keys)
+  const plain = officeModel(props({ columns: pane(51), rooms: [room('A', [ag('a1'), ag('a2')], { title: long })] }))
+  expect(m.rooms[0]!.title).toBe(plain.rooms[0]!.title)
+  // a quiet room's title gives the Button its cells: never longer than the same room's without it
+  const without = officeModel(props({ columns: pane(51), rooms: [room('C', [ag('c1', { status: 'done' })], { title: long })] }))
+  expect(textWidth(m.rooms[2]!.title)).toBeLessThan(textWidth(without.rooms[0]!.title))
+  // a folded room that the more line would have followed draws none
+  const held = officeModel(props({ columns: pane(51), rooms: [room('B', [], { folded: true, moreLabel: 'עוד 5 שסיימו', moreDone: 5 })] }))
+  expect(held.rooms[0]!.more).toBe('')
+  expect(held.lines.map(l => l.kind)).toEqual(['border', 'pad', 'title', 'pad', 'border', 'gap'])
+})

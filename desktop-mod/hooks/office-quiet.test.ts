@@ -46,7 +46,14 @@ test('buildOfficeProps: NO CLOCK RIDES THE PROPS — the same office a second, a
   const at = (now: number, agents = quiet, over: Partial<OfficePropsInput> = {}) => buildOfficeProps(input(agents, now, over))
   const first = at(M0)
   expect('nowMin' in first).toBe(false)
-  for (const later of [1000, 59_000, 60_000, 61_000, 3_600_000, 86_400_000]) expect(JSON.stringify(at(M0 + later)), `+${later} ms`).toBe(JSON.stringify(first))
+  // THE FOLD (spec 2026-11-15) is the one thing a resting office's props do with time, ONCE: the last helper finished
+  // 100 s before M0, so the room is open until M0 + 20 s — the same JSON all that while — folds there (the rooms alone
+  // move: `folded`, no agents), and from then on is the same JSON again, byte for byte, a minute, an hour and a day later
+  for (const later of [1000, 19_999]) expect(JSON.stringify(at(M0 + later)), `+${later} ms`).toBe(JSON.stringify(first))
+  const folded = at(M0 + 20_000)
+  expect(changed(first, folded)).toEqual(['rooms'])
+  expect(folded.rooms.map(r => [r.folded, r.agents.length])).toEqual([[true, 0]])
+  for (const later of [59_000, 60_000, 61_000, 3_600_000, 86_400_000]) expect(JSON.stringify(at(M0 + later)), `+${later} ms`).toBe(JSON.stringify(folded))
   // the meter is the reading's alone: another reading is another `usage`, and nothing else
   expect(changed(first, at(M0, quiet, { usage: { ...USAGE, pct: 43 } }))).toEqual(['usage'])
   // a working row: the same JSON until it passes LONG_RUNNING_MS, then its ⏱ — the rooms alone
@@ -66,7 +73,9 @@ test('buildOfficeProps: NO CLOCK RIDES THE PROPS — the same office a second, a
   expect(changed(d0, d1)).toEqual(['drawer'])
   expect(d1.drawer?.elapsedMin).toBe(3)
   // a finished agent's drawer shows its duration: fixed
-  expect(JSON.stringify(at(M0 + 3_600_000, quiet, { view: { ...DEFAULT_VIEW, selected: 'd1' } }))).toBe(JSON.stringify(at(M0, quiet, { view: { ...DEFAULT_VIEW, selected: 'd1' } })))
+  // (the drawer compared, and the folded office whole: the room itself folds between the two — THE FOLD, above)
+  expect(JSON.stringify(at(M0 + 3_600_000, quiet, { view: { ...DEFAULT_VIEW, selected: 'd1' } }).drawer)).toBe(JSON.stringify(at(M0, quiet, { view: { ...DEFAULT_VIEW, selected: 'd1' } }).drawer))
+  expect(JSON.stringify(at(M0 + 86_400_000, quiet, { view: { ...DEFAULT_VIEW, selected: 'd1' } }))).toBe(JSON.stringify(at(M0 + 3_600_000, quiet, { view: { ...DEFAULT_VIEW, selected: 'd1' } })))
 })
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -163,7 +172,10 @@ test('A QUIET HALF HOUR hands the office Client NOTHING NEW (the props guard): a
   await clock.advance(POLL_MS)
   const first = await handed(ui)
   const p0 = (await ui.find({ type: 'Client' }))!.props.props as OfficeProps
-  expect(p0.rooms.flatMap(r => r.agents.map(a => a.status))).toEqual(['stale', 'done', 'done', 'done'])
+  // (the helpers finished minutes ago: the room is folded from the first draw — THE FOLD, spec 2026-11-15 — a waiting lead
+  // and three finished helpers behind its title line; the header still counts them)
+  expect(p0.rooms.map(r => [r.folded, r.agents.length])).toEqual([[true, 0]])
+  expect(p0.counts).toEqual({ run: 0, idle: 1, done: 3 })
   expect(p0.usage).toEqual({ pct: 42, resetsAt: local(14, 30) })
   expect(await meterOf(ui)).toBe('⏳ 5h ▰▰▰▰▱▱▱▱▱▱ 42% · 14:30')
   for (let minute = 1; minute <= 30; minute++) {
