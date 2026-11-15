@@ -147,6 +147,8 @@ export type TheaterPrefs = {
   showDone: boolean
   /** Pinned rooms (session_full ids), drawn first. */
   pins: string[]
+  /** THE FOLD (spec 2026-11-15): the rooms the person opened or folded by hand (session_full ids); a room with no entry folds by the rule. Optional: prefs stored before it existed stay valid. */
+  folds?: Record<string, 'open' | 'closed'>
   /** Unused: kept so stored prefs stay compatible (the desktop's motion toggle was removed in live check 7, Q9). */
   still?: boolean
 }

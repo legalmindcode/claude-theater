@@ -156,7 +156,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On } from 'claude-code'
 
 import { ACT_GLYPH, I18N, activityLabel, dirOf, modelLabel, type Lang, type Strings } from './i18n'
-import { BRAND, DEFAULT_PREFS, DEFAULT_VIEW, DESKTOP, EMPTY_PAYLOAD, JUST_FINISHED_MS, LONG_RUNNING_MS, PANE_ID, STORE_PREFS_KEY, USAGE, personaIndex } from './model'
+import { BRAND, DEFAULT_PREFS, DEFAULT_VIEW, DESKTOP, EMPTY_PAYLOAD, FOLD_AFTER_MS, JUST_FINISHED_MS, LONG_RUNNING_MS, PANE_ID, STORE_PREFS_KEY, USAGE, personaIndex } from './model'
 import type { Agent, Payload, Prefs, TheaterStatus, View } from './model'
 import { UNKNOWN_MODEL_PILL } from './office-svg'
 // the pure chrome maths (the Client's full content height, the search text's cap) and the pure layout's row
@@ -347,6 +347,36 @@ export function roomWaves(all: readonly Agent[]): Map<string, { done: number; to
   return waves
 }
 
+/**
+ * THE FOLD (spec 2026-11-15 §3): the moment each conversation fell quiet — the latest end of its finished subagents (`end_ms`,
+ * else `mtime_ms`). No entry for a conversation with no finished subagent. The lead (`is_session`) is skipped: a lead that
+ * is thinking, or that ended a turn, says nothing about the room's subagents.
+ */
+export function roomQuietSince(all: readonly Agent[]): Map<string, number> {
+  const quiet = new Map<string, number>()
+  for (const a of all) {
+    if (a.is_session || a.status !== 'done') continue
+    const end = typeof a.end_ms === 'number' ? a.end_ms : (a.mtime_ms ?? 0)
+    if (end > (quiet.get(a.session_full) ?? 0)) quiet.set(a.session_full, end)
+  }
+  return quiet
+}
+
+/**
+ * THE FOLD, the rule (spec 2026-11-15 §3), in its order: a search opens every room shown (each holds a match, and a folded
+ * room would hide it); the person's own choice for the room — `open` or `closed` — wins over all that follows; a pinned
+ * room is open; a room with a wave (roomWaves: a subagent working or waiting) is open; a room whose last subagent finished
+ * less than FOLD_AFTER_MS ago is open; every other room is folded — a room that never had a subagent too. Pure: the caller
+ * hands the clock, and the answer changes once, when the room crosses FOLD_AFTER_MS.
+ */
+export function roomFolded(i: { search: string; choice: 'open' | 'closed' | undefined; pinned: boolean; wave: boolean; quietSince: number | undefined; now: number }): boolean {
+  if (i.search.trim() !== '') return false
+  if (i.choice === 'open') return false
+  if (i.choice === 'closed') return true
+  if (i.pinned || i.wave) return false
+  return i.quietSince === undefined || i.now - i.quietSince >= FOLD_AFTER_MS
+}
+
 /** PAGE roomShowsDone(): the room's override, else the global toggle. */
 export function roomShowsDone(roomDone: Readonly<Record<string, boolean>>, showDone: boolean, sess: string): boolean {
   return sess in roomDone ? !!roomDone[sess] : showDone
@@ -436,12 +466,14 @@ export function officeView(
   const visible = searched.filter(a => !a.closed && (a.status !== 'done' || roomShowsDone(roomDone, showDone, a.session_full) || kept.has(a.id)))
   const rooms = [...new Set(visible.map(a => a.session_full))]
   const pinned = new Set(pins)
+  const waves = roomWaves(all)
   rooms.sort((x, y) => {
     const sx = stat.get(x)
     const sy = stat.get(y)
     return (
       (pinned.has(y) ? 1 : 0) - (pinned.has(x) ? 1 : 0) ||
-      ((sy?.running ?? 0) > 0 ? 1 : 0) - ((sx?.running ?? 0) > 0 ? 1 : 0) ||
+      // THE ORDER (spec 2026-11-15 §5): the rooms with a wave — a SUBAGENT working or waiting; the lead's own work no longer counts
+      (waves.has(y) ? 1 : 0) - (waves.has(x) ? 1 : 0) ||
       (sy?.mtime ?? 0) - (sx?.mtime ?? 0)
     )
   })

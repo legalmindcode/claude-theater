@@ -75,6 +75,11 @@ export const POLL_MS = 5000
 export const LONG_RUNNING_MS = 10 * 60 * 1000
 /** ⭐ "just finished" window (PAGE line 1583: the `recent` class is removed 10 s after the finish). */
 export const JUST_FINISHED_MS = 10 * 1000
+/**
+ * THE FOLD (spec 2026-11-15): a room with no active subagent folds to its title line this long after its last subagent
+ * finished — long enough to see who finished and what came back. ui.tsx roomFolded.
+ */
+export const FOLD_AFTER_MS = 120_000
 
 /** Display order of statuses. */
 export const STATUS_ORDER: Record<TheaterStatus, number> = { running: 0, stale: 1, done: 2 }
