@@ -27,7 +27,7 @@ import type { Agent, Payload, Prefs, View } from './model'
 import { ACT_MAX, NAME_MAX, cut, cutTask } from './office-layout'
 import { UNKNOWN_MODEL_PILL } from './office-svg'
 import { personaName } from './personas'
-import { RECENT_DONE, agentElapsed, effectivePayload, emptyKind, headerCounts, isLongRunning, minuteClock, officeView, roomShowsDone, roomTitle, roomWaves } from './ui'
+import { RECENT_DONE, agentElapsed, effectivePayload, emptyKind, headerCounts, isLongRunning, minuteClock, officeView, roomFolded, roomQuietSince, roomShowsDone, roomTitle, roomWaves } from './ui'
 
 /** The Client's key and the `ui.message` matcher. */
 export const OFFICE_KEY = 'office'
@@ -54,6 +54,17 @@ export type Wave = { done: number; total: number }
 export type OfficeRoom = {
   id: string; title: string; small: string; pinned: boolean; showDone: boolean
   run: number; stale: number; done: number
+  /**
+   * THE FOLD (spec 2026-11-15; ui.tsx roomFolded): the room is folded to its title line. Present only on a folded room — an
+   * open room's JSON is what it was. A folded room rides without its agents (`agents` empty, `moreDone` 0, `moreLabel` ''):
+   * nothing of them is drawn, measured or sent.
+   */
+  folded?: true
+  /**
+   * THE FOLD: the room is open and quiet (no wave, no search), so its title draws the Button that folds it. Present only
+   * then. A room whose subagents work has neither key: its card and its title are what they were before the fold existed.
+   */
+  foldable?: true
   /** THE WAVE while the room has one: its title draws the progress bar in place of the counts (office-layout.ts countsFor). Absent at rest — a room with no active subagent carries no such key, so its JSON is what it was. */
   wave?: Wave
   /** The agents the room draws, in the office's order: the working and waiting, and the finished it shows (all of them, or the RECENT_DONE most recent — ui.tsx officeView). */
@@ -105,7 +116,7 @@ export type OfficeProps = {
 
 /** One action of the office (what a click, a key or the search does). */
 export type OfficeMessage =
-  | { t: 'open'; id: string } | { t: 'close' } | { t: 'pin'; room: string } | { t: 'roomDone'; room: string }
+  | { t: 'open'; id: string } | { t: 'close' } | { t: 'pin'; room: string } | { t: 'roomDone'; room: string } | { t: 'fold'; room: string; to: 'open' | 'closed' }
   | { t: 'showDone' } | { t: 'mute' } | { t: 'lang' } | { t: 'help' } | { t: 'demo'; on?: boolean }
   | { t: 'search'; q: string } | { t: 'content'; rows: number } | { t: 'pull'; seq: number }
 /** An action as THE OUTBOX numbers it (office-client.tsx: each number is applied once per instance). */
@@ -214,6 +225,13 @@ export function buildOfficeProps(input: OfficePropsInput): OfficeProps {
   // the room draws its RECENT_DONE most recent (never hidden behind the more line), and drawn ahead of them
   const starred = new Set(office.agents.filter(a => starOf(a) !== 0).map(a => a.id))
   const { rooms, stat, order, moreDone, finished } = officeView(office.agents, view.search, lang, showDone, roomDone, prefs.pins, RECENT_DONE, starred)
+  // THE FOLD (spec 2026-11-15): which rooms are folded to their title line now — by ui.tsx roomFolded, from the search, the
+  // person's own choice (prefs.folds), the pin, the wave and the moment the room fell quiet. Never in the demo: its cast is a
+  // show, not an office. A folded room's agents ride nowhere: not the props, not the cap's ranking, not the footer's count
+  const quiet = roomQuietSince(office.agents)
+  const foldedRooms = new Set(office.demo ? [] : rooms.filter(s => roomFolded({
+    search: view.search, choice: prefs.folds?.[s], pinned: prefs.pins.includes(s), wave: waves.has(s), quietSince: quiet.get(s), now,
+  })))
   const nowMin = minuteClock(now)
   const cards = new Map<number, OfficeAgent>()
   /** The card of `order[i]` (memoised: a rebuild under the budget maps no agent twice). */
@@ -235,7 +253,7 @@ export function buildOfficeProps(input: OfficePropsInput): OfficeProps {
   /** Whether `a` ranks first among the finished: badged ⭐ (alive) or ❌. */
   const badged = (a: Agent): boolean => a.failed === true || starred.has(a.id)
   // THE PROPS CAP's ranking: the cards still working or waiting first, then the finished — each in the office's order
-  const ranked = order.map((_, i) => i).sort((x, y) => (order[x]!.status === 'done' ? 1 : 0) - (order[y]!.status === 'done' ? 1 : 0) || x - y)
+  const ranked = order.map((_, i) => i).filter(i => !foldedRooms.has(order[i]!.session_full)).sort((x, y) => (order[x]!.status === 'done' ? 1 : 0) - (order[y]!.status === 'done' ? 1 : 0) || x - y)
   const sel = view.selected !== null ? office.agents.find(a => a.id === view.selected) : undefined
   const kind = order.length === 0 ? emptyKind(view.search, office.agents.length, showDone) : null
   const labels: Record<string, string> = {}
@@ -243,15 +261,20 @@ export function buildOfficeProps(input: OfficePropsInput): OfficeProps {
   /** The props with at most `cap` agents and the drawer's task / result cut to `textMax` cells. */
   const build = (cap: number, textMax: number): OfficeProps => {
     const kept = new Set(ranked.slice(0, cap))
-    const dropped = order.length - kept.size
+    const dropped = ranked.length - kept.size
     const outRooms: OfficeRoom[] = []
+    // THE FOLD and THE PROPS BUDGET: a folded room has no agent to shed, so the cap bounds the folded rooms too — past the
+    // agents kept, as many folded rooms as the cap still has room for (an office of hundreds of quiet conversations)
+    let foldedLeft = Math.max(0, cap - kept.size)
     for (const s of rooms) {
       // the room's rows: the working and waiting in the office's order, then the finished — the badged (⭐, ❌) first (the probe's)
       const inRoom = order.map((a, i) => i).filter(i => order[i]!.session_full === s && kept.has(i))
       const live = inRoom.filter(i => order[i]!.status !== 'done')
       const fin = inRoom.filter(i => order[i]!.status === 'done')
       const agents: OfficeAgent[] = [...live, ...fin.filter(i => badged(order[i]!)), ...fin.filter(i => !badged(order[i]!))].map(toAgent)
-      if (agents.length === 0) continue // every agent of the room went over the cap: the footer counts them
+      const folded = foldedRooms.has(s)
+      if (agents.length === 0 && !folded) continue // every agent of the room went over the cap: the footer counts them
+      if (folded && foldedLeft-- <= 0) continue
       const st = stat.get(s)
       const shows = roomShowsDone(roomDone, showDone, s)
       const more = moreDone.get(s) ?? 0
@@ -260,11 +283,13 @@ export function buildOfficeProps(input: OfficePropsInput): OfficeProps {
         pinned: prefs.pins.includes(s), showDone: shows,
         run: st?.running ?? 0, stale: st?.stale ?? 0, done: st?.done ?? 0,
         ...(waves.get(s) ? { wave: waves.get(s)! } : {}),
-        agents, moreDone: more,
+        ...(folded ? { folded: true as const } : {}),
+        ...(!folded && !office.demo && !waves.has(s) && view.search.trim() === '' ? { foldable: true as const } : {}),
+        agents, moreDone: folded ? 0 : more,
         // THE ONE FINISHED TOGGLE (live check 7, Q6), under the title: only for a room with more finished than the RECENT_DONE it
         // always draws — "N more finished" while it holds them back, "Hide finished" once it shows them all; a room with RECENT_DONE
         // or fewer draws them all either way, so a line there would hide nothing (it only took itself away)
-        moreLabel: (finished.get(s) ?? 0) > RECENT_DONE ? (shows ? L.hideDone : L.moreDoneN(more)) : '',
+        moreLabel: !folded && (finished.get(s) ?? 0) > RECENT_DONE ? (shows ? L.hideDone : L.moreDoneN(more)) : '',
       })
     }
     const drawer: OfficeDrawer | null = sel ? {
@@ -301,7 +326,7 @@ export function buildOfficeProps(input: OfficePropsInput): OfficeProps {
     size = JSON.stringify(props).length
   }
   while (size > PROPS_BUDGET && cap > 0) {
-    cap = Math.max(0, Math.min(Math.min(cap, order.length) - 1, Math.floor((cap * PROPS_BUDGET * 0.9) / size)))
+    cap = Math.max(0, Math.min(Math.min(cap, ranked.length + foldedRooms.size) - 1, Math.floor((cap * PROPS_BUDGET * 0.9) / size)))
     props = build(cap, textMax)
     size = JSON.stringify(props).length
   }

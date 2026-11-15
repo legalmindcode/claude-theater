@@ -215,7 +215,7 @@ import type { ClientModule, ClientSurface, RenderElement } from 'claude-code'
 
 import { COMPACT_BELOW, CREDIT_ROWS, DRAWER_FRAME_ROWS, WINDOW_ROWS, cleanSearch, demoLine, drawerInner, drawerLimits, drawerLines, drawerPad, emptyLines, fixedRows, helpPairs, helpRows, labelsFit, overscanOf, searchShown, windowOf } from './office-chrome'
 import type { DrawerLine } from './office-chrome'
-import { BRAND_ACCENT_DARK, CARD_BORDER, COUNT_ICON, FIT, NBSP, NO_DECOR, PIN, PIN_OFF, TITLE_GAP, cut, fitCells, fitLine, geometry, iconLabel, nb, officeModel, roomCache, textWidth, trimWindow } from './office-layout'
+import { BRAND_ACCENT_DARK, CARD_BORDER, COUNT_ICON, FIT, LESS_MARK, MORE_MARK, NBSP, NO_DECOR, PIN, PIN_OFF, TITLE_GAP, cut, fitCells, fitLine, geometry, iconLabel, nb, officeModel, roomCache, textWidth, trimWindow } from './office-layout'
 import type { Floors, Geo, ModeToken, OfficeDecor, OfficeModel, RoomCache, RoomView, RowView } from './office-layout'
 import type { OfficeBatch, OfficeItem, OfficeMessage, OfficeNote, OfficeProps } from './office-props'
 import { usageLabel, usageShort, usageTiny } from './usage'
@@ -331,6 +331,13 @@ function pressPin(surface: Surface, room: string): void {
   inst.typing = false
   inst.frozen ??= inst.model.rooms.map(r => r.id)
   send(surface, inst, { t: 'pin', room })
+}
+/** THE FOLD's Button's press (spec 2026-11-15): the room opened or folded by hand — `to` is what the Button drawn offers, so a double press asks for the same thing twice and changes nothing the second time. */
+function pressFold(surface: Surface, room: string, to: 'open' | 'closed'): void {
+  const cur = surface.state
+  if (!cur) return
+  cur.inst.typing = false
+  send(surface, cur.inst, { t: 'fold', room, to })
 }
 /** The more / hide line's press: the room's one finished toggle (Q3, Q6). */
 function pressMore(surface: Surface, room: string): void {
@@ -839,6 +846,10 @@ const Office: ClientModule<OfficeProps, OfficeState> = (props, surface) => {
         Button({ key: `pin:${room.id}`, plain: true, label: room.pinned ? PIN : PIN_OFF, onPress: () => pressPin(surface, room.id) }),
         Box({ flexGrow: 1, flexShrink: 1, minWidth: 0, height: 1, overflow: 'hidden', justifyContent: edge, children: [Text({ bold: true, children: [room.title] })] }),
         Box({ flexShrink: 0, height: 1, children: [Text({ dimColor: true, children: [room.counts] })] }),
+        // THE FOLD (spec 2026-11-15): a quiet room's Button, the title line's last child — the more line's arrows: the one
+        // that points into the card while it is folded (a press opens it), the down arrow while it is open (a press folds
+        // it). A room whose subagents work draws none (office-layout.ts RoomView.foldTo null)
+        ...(room.foldTo ? [Button({ key: `fold:${room.id}`, plain: true, label: room.foldTo === 'open' ? MORE_MARK[rtl ? 'rtl' : 'ltr'] : LESS_MARK, onPress: () => pressFold(surface, room.id, room.foldTo!) })] : []),
       ] })
       /** The blank line under the title (round 9: no rule — it never stretched with the card; the title's emphasis is its bold and this line). */
       const blank = (): RenderElement => Box({ height: 1 })
@@ -874,9 +885,8 @@ const Office: ClientModule<OfficeProps, OfficeState> = (props, surface) => {
       /** A whole card, keyed by its room (live check 7, R14: a line inserted before it never repaints it as another): the frame, the title line, the more line under it, the blank line, the table (every row of the room a cell or a spacer line). */
       const card = (room: RoomView): RenderElement => Box({ key: `room:${room.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: CARD_BORDER, paddingX: geo.px, paddingY: 1, marginBottom: 1, width: '100%', overflow: 'hidden', children: [
         titleLine(room),
-        ...(room.more ? [moreLine(room)] : []),
-        blank(),
-        table(room),
+        // THE FOLD: a folded card is its title line alone
+        ...(room.folded ? [] : [...(room.more ? [moreLine(room)] : []), blank(), table(room)]),
       ] })
       drawn.forEach(room => kids.push(card(room)))
     }

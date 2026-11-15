@@ -449,9 +449,15 @@ export function geometry(columns: number): Geo {
   return { columns, W, px, frame, inner, budget: fitCells(inner), L: fitLine(W), oneLine: W >= ONE_LINE_FROM, full: W >= MODEL_FULL_FROM, wide: W >= WIDE_FROM, centred: W >= CENTRE_AT, margin: Math.max(0, Math.floor((columns - W) / 2)) }
 }
 
-/** The cells the title line leaves the title: the inner width less the title's own padding, the pin and its gap when pinned, the counts and the gap before them. */
-function titleRoom(geo: Geo, counts: string, pinned: boolean): number {
-  return geo.inner - 2 - (pinned ? EMOJI_CELLS + TITLE_GAP : 0) - textWidth(counts) - TITLE_GAP
+/** THE FOLD's Button (spec 2026-11-15): one cell at the title line's far edge, after the counts — on a quiet room's card only. */
+export const FOLD_CELLS = 1
+/**
+ * The cells the title line leaves the title: the inner width less the title's own padding, the pin and its gap when pinned,
+ * the counts and the gap before them — and, when the card draws THE FOLD's Button (`fold`: a quiet room, folded or open),
+ * that Button and its gap. A room whose subagents work draws none, so its title keeps every cell it had.
+ */
+function titleRoom(geo: Geo, counts: string, pinned: boolean, fold = false): number {
+  return geo.inner - 2 - (pinned ? EMOJI_CELLS + TITLE_GAP : 0) - textWidth(counts) - TITLE_GAP - (fold ? FOLD_CELLS + TITLE_GAP : 0)
 }
 
 /** The cells of a room's progress bar (the five-hour meter's marks, usage.ts: ▰ full, ▱ empty). */
@@ -474,13 +480,13 @@ export function waveText(wave: Wave, bar: boolean): string {
  * review). THE WAVE: a room with a wave draws its progress bar here instead — the bar and the percent while the title keeps
  * TITLE_MIN cells, else the percent alone. Same line, same Text: no row is added or removed.
  */
-export function countsFor(room: Pick<OfficeRoom, 'run' | 'stale' | 'done' | 'wave'>, geo: Geo, pinned: boolean): string {
+export function countsFor(room: Pick<OfficeRoom, 'run' | 'stale' | 'done' | 'wave'>, geo: Geo, pinned: boolean, fold = false): string {
   if (room.wave) {
     const bar = waveText(room.wave, true)
-    return fitCells(titleRoom(geo, bar, pinned)) >= TITLE_MIN ? bar : waveText(room.wave, false)
+    return fitCells(titleRoom(geo, bar, pinned, fold)) >= TITLE_MIN ? bar : waveText(room.wave, false)
   }
   const forms = [countsText(room), countsText({ run: room.run, stale: room.stale, done: 0 }), countsText({ run: room.run, stale: 0, done: 0 })]
-  for (const c of forms) if (fitCells(titleRoom(geo, c, pinned)) >= TITLE_MIN) return c
+  for (const c of forms) if (fitCells(titleRoom(geo, c, pinned, fold)) >= TITLE_MIN) return c
   return forms[2]!
 }
 
@@ -508,8 +514,8 @@ export function latinDominant(s: string): boolean {
  * under 8 cells. (A Hebrew title keeps LINE_FIT: round 9 drew it whole on the desktop.) `pinned` has no default: every
  * caller states it, as countsFor's.
  */
-export function cutTitle(title: string, geo: Geo, counts: string, pinned: boolean): string {
-  const room = titleRoom(geo, counts, pinned)
+export function cutTitle(title: string, geo: Geo, counts: string, pinned: boolean, fold = false): string {
+  const room = titleRoom(geo, counts, pinned, fold)
   return cutWords(title, Math.max(8, latinDominant(title) ? fitCells(room) : fitLine(room)))
 }
 
@@ -672,6 +678,10 @@ export type RoomView = {
   counts: string
   /** The room is pinned (prefs.pins): the colour 📌 on its title; else PIN_OFF. The pin Button is drawn on every card. */
   pinned: boolean
+  /** THE FOLD (spec 2026-11-15): the card is its title line alone — `rows` empty, `more` '', `blankAt` and `moreAt` -1. */
+  folded: boolean
+  /** THE FOLD's Button on this card's title: 'open' (the room is folded: a press opens it), 'closed' (a quiet open room: a press folds it), or null — a room whose subagents work draws none. */
+  foldTo: 'open' | 'closed' | null
   /**
    * The title line's y. (titleAt, blankAt and moreAt are read by no production code since the hit-test by y went — phase B,
    * decision 26 — and are KEPT on purpose: the tests pin the more line's and the blank line's place by them, and they are the
@@ -705,7 +715,9 @@ export type OfficeDecor = { focus: string | null }
 export const NO_DECOR: OfficeDecor = { focus: null }
 
 /** The lines a room's card takes: CARD_LINES around its rows, MORE_LINES when it draws the more / hide line. */
-export function cardLines(agents: number, more: boolean): number {
+export function cardLines(agents: number, more: boolean, folded = false): number {
+  // THE FOLD: a folded card is its frame and its title line — no blank line, no more line, no rows
+  if (folded) return CARD_LINES - 1
   return CARD_LINES + Math.max(0, agents) + (more ? MORE_LINES : 0)
 }
 
@@ -715,7 +727,7 @@ export function cardLines(agents: number, more: boolean): number {
  */
 export function rowCount(props: OfficeProps): number {
   let n = 0
-  for (const room of props.rooms) n += cardLines(room.agents.length, room.moreLabel !== '')
+  for (const room of props.rooms) n += cardLines(room.agents.length, room.moreLabel !== '', room.folded === true)
   return n
 }
 
@@ -747,9 +759,11 @@ function roomBase(room: OfficeRoom, geo: Geo, mode: TableMode, cache: RoomCache 
     if (hit && hit.key === key) return hit.base
   }
   // the pin's cells are reserved on every title: the pin Button is always drawn (decision 26)
-  const counts = countsFor(room, geo, true)
+  // (THE FOLD: a quiet room's card draws the fold Button too — its cells are reserved only there)
+  const fold = room.folded === true || room.foldable === true
+  const counts = countsFor(room, geo, true, fold)
   const base: RoomBase = {
-    counts: nb(counts), title: nb(cutTitle(room.title, geo, counts, true)),
+    counts: nb(counts), title: nb(cutTitle(room.title, geo, counts, true, fold)),
     rows: room.agents.map(a => ({
       id: a.id, mark: markOf(a), color: markFg(a), who: nb(`${a.emoji} ${cut(a.name, mode.nameMax)}`),
       model: mode.model === 'none' ? '' : nb(modelText(a.model, mode.model === 'full')),
@@ -814,16 +828,21 @@ export function officeModel(props: OfficeProps, decor: OfficeDecor = NO_DECOR, c
     // shows them all (the props draw it only past RECENT_DONE finished: Q6) — a labelled control, so iconLabel lays it: read
     // arrow first in either pane (`▸ 2 more finished` in English)
     let moreAt = -1
+    const folded = room.folded === true
     const arrow = room.showDone ? LESS_MARK : MORE_MARK[rtl ? 'rtl' : 'ltr']
-    const more = room.moreLabel ? nb(iconLabel(arrow, room.moreLabel, rtl)) : ''
+    const more = !folded && room.moreLabel ? nb(iconLabel(arrow, room.moreLabel, rtl)) : ''
     if (more) {
       moreAt = lines.length
       line('more', room.id)
     }
-    const blankAt = lines.length
-    line('blank', room.id)
+    // THE FOLD: a folded card ends at its title line — no blank line under it, no row
+    let blankAt = -1
+    if (!folded) {
+      blankAt = lines.length
+      line('blank', room.id)
+    }
     const rows: RowView[] = []
-    for (const r of base.rows) {
+    for (const r of folded ? [] : base.rows) {
       const y = lines.length
       const focus = decor.focus === r.id
       // the mark at the reading edge, the marker on its inner side when focused (a Text with no Hebrew is laid left to right)
@@ -837,7 +856,7 @@ export function officeModel(props: OfficeProps, decor: OfficeDecor = NO_DECOR, c
     rooms.push({
       id: room.id, top, height: lines.length - top,
       title: base.title, counts,
-      pinned: room.pinned,
+      pinned: room.pinned, folded, foldTo: folded ? 'open' : room.foldable === true ? 'closed' : null,
       titleAt, blankAt, rows, more, moreAt,
     })
   })

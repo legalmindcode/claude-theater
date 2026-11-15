@@ -683,6 +683,11 @@ export function renderKey(payload: Payload, now: number, coarse = false): string
   }
   const alive = Object.entries(payload.stars).filter(([, t]) => now - t < JUST_FINISHED_MS).map(([id]) => id).sort()
   parts.push(alive.join(','))
+  // THE FOLD (spec 2026-11-15 §7): the rooms whose quiet FOLD_AFTER_MS have passed — so a room that crosses them is redrawn,
+  // once, folded (the rule's other inputs — the search, the choice, the pin — are state writes of their own)
+  const waving = roomWaves(payload.agents)
+  const rested = [...roomQuietSince(payload.agents)].filter(([s, t]) => !waving.has(s) && now - t >= FOLD_AFTER_MS).map(([s]) => s).sort()
+  parts.push(rested.join(','))
   return parts.join('\u0002')
 }
 
@@ -772,6 +777,14 @@ async function setDemo($: EngineInterface, on: boolean): Promise<View> {
 const flipShowDone = (p: Prefs): Prefs => ({ ...p, showDone: !p.showDone })
 const flipMuted = (p: Prefs): Prefs => ({ ...p, muted: !p.muted })
 const flipPin = (room: string) => (p: Prefs): Prefs => ({ ...p, pins: p.pins.includes(room) ? p.pins.filter(x => x !== room) : [...p.pins, room] })
+/** THE FOLD: the person's choice for `room` set to `to`, or dropped (undefined: the room follows the rule again); `folds` leaves the prefs with its last entry. */
+const setFold = (room: string, to: 'open' | 'closed' | undefined) => (p: Prefs): Prefs => {
+  const folds: Record<string, 'open' | 'closed'> = { ...(p.folds ?? {}) }
+  if (to === undefined) delete folds[room]
+  else folds[room] = to
+  const { folds: _old, ...rest } = p
+  return Object.keys(folds).length > 0 ? { ...rest, folds } : rest
+}
 /** The settings popover opened or closed — and an open drawer closed with it (live check 7, Q2: the settings replace the drawer, and closing them brings no old drawer back). */
 const flipHelp = (v: View): View => ({ ...v, helpOpen: !v.helpOpen, selected: null })
 /**
@@ -888,6 +901,23 @@ async function applyOfficeAction($: EngineInterface, data: unknown): Promise<App
       return wrote(await savePrefs($, flipMuted))
     case 'pin':
       return typeof m.room === 'string' ? wrote(await savePrefs($, flipPin(m.room))) : NOTHING
+    case 'fold': {
+      // THE FOLD (spec 2026-11-15): the room opened or folded by hand. What the press asks for (`to`) is kept as the person's
+      // choice only where the rule alone would not give it; where it would — a hand-opened room folded again once it is
+      // quiet, a hand-folded room opened again while its subagents work — the choice is DROPPED, so the room goes back to
+      // folding and opening by itself. A press that asks for what is already so writes nothing
+      const to = (m as { to?: unknown }).to
+      if (typeof m.room !== 'string' || (to !== 'open' && to !== 'closed')) return NOTHING
+      const room = m.room
+      const [prefs, payload, view, clock] = await Promise.all([read($, prefsAtom), read($, payloadAtom), read($, viewAtom), $.clock.now().catch(() => null)])
+      const now = clock ?? Math.max(clockSeen, payload.scanned_ms)
+      const agents = effectivePayload(payload, view, now, rememberReal(payload)).agents
+      const about = { search: '', pinned: prefs.pins.includes(room), wave: roomWaves(agents).has(room), quietSince: roomQuietSince(agents).get(room), now }
+      const byRule = roomFolded({ ...about, choice: undefined }) ? 'closed' : 'open'
+      const next = byRule === to ? undefined : to
+      if (prefs.folds?.[room] === next) return NOTHING
+      return wrote(await savePrefs($, setFold(room, next)))
+    }
     case 'lang':
       return wrote(await setLang($, otherLang((await read($, prefsAtom)).lang)))
     case 'help':

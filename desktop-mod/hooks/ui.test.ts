@@ -1090,6 +1090,10 @@ test('HOUSEKEEPING (the publish branch, same tick as the write): a vanished sele
   expect((await officePropsOf(ui))?.rooms.find(r => r.id === QSESS2)).toMatchObject({ pinned: true, showDone: true })
   expect((captured.store.prefs as { pins: string[] }).pins).toEqual([QSESS2])
   expect(captured.store.roomDone).toEqual({ [QSESS2]: true })
+  // (THE FOLD, spec 2026-11-15: the pinned room folded by hand — `closed` is kept, for the rule would open a pinned room —
+  // and that choice leaves with the room too, in the same prefs write as its pin)
+  await ui.post({ t: 'fold', room: QSESS2, to: 'closed' }, { in: OFFICE_KEY })
+  expect((captured.store.prefs as { folds?: Record<string, string> }).folds).toEqual({ [QSESS2]: 'closed' })
   const w3 = { ...captured.writes }
   const s3 = { ...captured.storeWrites }
   ageOut(files, QLEAD2, clock.now())
@@ -1102,6 +1106,7 @@ test('HOUSEKEEPING (the publish branch, same tick as the write): a vanished sele
   expect(captured.storeWrites.prefs).toBe((s3.prefs ?? 0) + 1)
   expect(captured.storeWrites.roomDone).toBe((s3.roomDone ?? 0) + 1)
   expect((captured.store.prefs as { pins: string[] }).pins).toEqual([])
+  expect('folds' in (captured.store.prefs as object)).toBe(false)
   expect(captured.store.roomDone).toEqual({})
   expect(captured.seq.slice(-5)).toEqual(['open', 'payload', 'prefs', 'store:prefs', 'store:roomDone'])
   // (3) quiet polls afterwards: nothing is written, nothing redrawn (THE FLICKER GUARD holds after a prune)
