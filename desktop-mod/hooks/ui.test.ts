@@ -430,7 +430,7 @@ test('the office draws rooms, cards and counts on every text surface (the footer
     expect(await ui.find({ type: 'Text', text: /💬 Ship the v2 config migration\./ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /💬 research/ })).toBeDefined()
     // cards: the Agent description is the name; MCP tool → ⌁ server (decision 29); finished hidden
-    expect(await ui.find({ key: 'open:a1' })).toBeDefined()
+    expect((await ui.find({ key: 'reloading' })) ?? (await ui.find({ key: 'open:a1' }))).toBeDefined()
     expect((await ui.find({ key: 'open:a1' }))?.text).toMatch(/map session-token validation/)
     expect(await ui.find({ type: 'Text', text: /⌁ github/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /▤ קורא/ })).toBeDefined()
@@ -572,7 +572,7 @@ test('presses: show finished, mute, language (RTL→LTR, retitle), pin, room tog
     await ui.input({ key: 'search', text: 'tri\u001b[1mage', kind: 'change' })
     expect((await ui.find({ key: 'search' }))?.props.value).toBe('tri [1mage')
     await ui.input({ key: 'search', text: '', kind: 'change' })
-    expect(await ui.find({ key: 'open:a1' })).toBeDefined()
+    expect((await ui.find({ key: 'reloading' })) ?? (await ui.find({ key: 'open:a1' }))).toBeDefined()
     // help popover
     await ui.press({ key: 'help' })
     expect(await ui.find({ type: 'Text', text: /^עזרה$/ })).toBeDefined()

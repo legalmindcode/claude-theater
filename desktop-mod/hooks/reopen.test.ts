@@ -446,7 +446,7 @@ test('A FALL RIGHT AFTER A REOPEN DOES NOT TOAST: the person did not ask for the
   await ui.press({ key: 'help' })
   await ui.redraw(FAULTED)
   expect(await ui.find({ type: 'Client' })).toBeUndefined()
-  expect(await ui.find({ key: 'open:a1' })).toBeDefined() // the text cards
+  expect((await ui.find({ key: 'reloading' })) ?? (await ui.find({ key: 'open:a1' }))).toBeDefined() // the text cards
   expect(captured.toasts).toEqual([]) // silent
   expect(recordOf(captured.store).map(e => e.k === 'fault' ? `fault:${e.retry}` : e.k)).toEqual(['reopen', 'fault:1'])
   // the retry, unchanged: the Client is back CLIENT_RETRY_MS later

@@ -26,6 +26,14 @@ function-hooks API, which may change between releases.
 
 ### Changed
 
+- **A short fall of the desktop office no longer flips the pane to the text
+  cards.** When the app drops the office, the pane now shows one quiet line,
+  "The office is reloading…", for the first 30 seconds of the fall, and the text
+  cards only if the office is still down after that. On a machine short of
+  memory the office usually draws again within a few seconds, so the pane no
+  longer jumps to the old-looking cards and back several times an hour. A run of
+  falls less than 90 seconds apart counts as one fall. The retries, the record
+  of falls and the toast are unchanged.
 - **Quiet conversations fold to one line in the desktop office.** A room with
   no subagent working or waiting folds to its title line two minutes after its
   last subagent finished, and opens by itself when a subagent starts in it; a
