@@ -308,8 +308,9 @@ test('ui.fault on the office: the desktop falls back to the text cards at once, 
   expect(captured.toasts).toEqual([])
   expect(logs.filter(l => l.startsWith('office Client failed'))).toEqual([])
   expect(await ui.find({ type: 'Client' })).toBeUndefined()
-  expect(await ui.find({ key: 'open:a1' })).toBeDefined() // the text cards (their help card drawn above them: the view kept)
-  expect(await ui.find({ type: 'Text', text: /משרד הסוכנים/ })).toBeDefined()
+  // THE RELOADING LINE (16.11): the first CLIENT_QUIET_MS of the outage draw one quiet line, not the text cards
+  expect(await ui.find({ key: 'reloading' })).toBeDefined()
+  expect(await ui.find({ key: 'open:a1' })).toBeUndefined()
   // the fallback holds over the redraws (the window back in range) until the automatic retry is due (CLIENT_RETRY_MS; the
   // next test is the retries' own); still nothing told
   await ui.redraw({ ...PANE.props })
@@ -326,7 +327,7 @@ test('ui.fault on the office: the desktop falls back to the text cards at once, 
   await ui.redraw({ ...PANE.props, scroll: { offset: FAULT_OFFSET, bodyRows: 40 } })
   expect(captured.toasts).toEqual([])
   expect(await ui.find({ type: 'Client' })).toBeUndefined()
-  expect(await ui.find({ key: 'open:a1' })).toBeDefined()
+  expect((await ui.find({ key: 'reloading' })) ?? (await ui.find({ key: 'open:a1' }))).toBeDefined()
   // (reset: the flag is the plugin bundle's module memory)
   await ui.redraw({ ...PANE.props })
   await $.command.run(THEATER)
@@ -367,7 +368,7 @@ test('ui.fault on the office, the retries: the Client is drawn again after a fau
     expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
     await ui.redraw(faulted)
     expect(await ui.find({ type: 'Client' })).toBeUndefined()
-    expect(await ui.find({ key: 'open:a1' })).toBeDefined()
+    expect((await ui.find({ key: 'reloading' })) ?? (await ui.find({ key: 'open:a1' }))).toBeDefined()
     await ui.redraw({ ...PANE.props })
   }
   /** The retry: not yet due a millisecond short of `ms`, due at it — the Client is drawn again, a fresh instance. */
@@ -397,7 +398,7 @@ test('ui.fault on the office, the retries: the Client is drawn again after a fau
   await clock.advance(CLIENT_RETRY_MAX_MS * 3)
   await clock.advance(POLL_MS * 3)
   expect(await ui.find({ type: 'Client' })).toBeUndefined()
-  expect(await ui.find({ key: 'open:a1' })).toBeDefined()
+  expect((await ui.find({ key: 'reloading' })) ?? (await ui.find({ key: 'open:a1' }))).toBeDefined()
   // a subagent starts in this conversation: the office matters now — the Client is tried at once, silently, a wave anew
   await spawn('t-1')
   expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
@@ -481,7 +482,7 @@ test('THE QUIET FALL: a fall the office comes back from within CLIENT_QUIET_MS s
     expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
     await ui.redraw(FAULTED)
     expect(await ui.find({ type: 'Client' })).toBeUndefined()
-    expect(await ui.find({ key: 'open:a1' })).toBeDefined()
+    expect((await ui.find({ key: 'reloading' })) ?? (await ui.find({ key: 'open:a1' }))).toBeDefined()
     await ui.redraw({ ...PANE.props })
   }
   // A SHORT FALL: back at the first retry — recorded, never told, however long we then wait
@@ -685,7 +686,7 @@ test('THE RECORD never stands in the way, and loses nobody\'s entry: with the fa
   expect(captured.seq).toContain('held:' + mine)
   expect(recordOf(captured.store)).toHaveLength(3)             // not landed
   expect(await ui.find({ type: 'Client' })).toBeUndefined()    // the cards, at once
-  expect(await ui.find({ key: 'open:a1' })).toBeDefined()
+  expect((await ui.find({ key: 'reloading' })) ?? (await ui.find({ key: 'open:a1' }))).toBeDefined()
   // another conversation's process writes an entry of its own meanwhile
   const theirs = officeLogKey(now + 1, 'other-conversation', 1)
   captured.store[theirs] = { t: now + 1, sid: 'other-conversation', k: 'fault', phase: 'load', why: 'x', retry: 1 }
@@ -742,7 +743,7 @@ test('THE RECORD is a by-product: a store that refuses the write loses that entr
   const fallAndBack = async () => {
     await ui.redraw(FAULTED)
     expect(await ui.find({ type: 'Client' })).toBeUndefined()
-    expect(await ui.find({ key: 'open:a1' })).toBeDefined()
+    expect((await ui.find({ key: 'reloading' })) ?? (await ui.find({ key: 'open:a1' }))).toBeDefined()
     await ui.redraw({ ...PANE.props })
     await clock.advance(CLIENT_RETRY_MS)
     now += CLIENT_RETRY_MS
@@ -873,4 +874,57 @@ test('THE LOGO (decision 28b): session.start reads the plugin\'s own logo ONCE �
   expect(await after.find({ type: 'Markdown' })).toBeUndefined()
   expect((await after.find({ type: 'Link' }))?.props.href).toBe('https://legalmind.co.il')
   await after.unmount()
+})
+
+/**
+ * THE RELOADING LINE (16.11, Asaf: "the office keeps falling to the old version and then steadies" — the old version being
+ * the text cards): while the office is down, the desktop pane draws one quiet line for the first CLIENT_QUIET_MS of the
+ * outage, and the text cards only once the office has been down that long. The retries, the record and the toast are as
+ * they were.
+ */
+test('THE RELOADING LINE: a fall draws one quiet line, never the text cards, for CLIENT_QUIET_MS from its wave\'s first fault — through the retries — then the text cards, at the millisecond; a fall CLIENT_ALIVE_GAP_MS after the last starts a wave, and the line, anew', { timeoutMs: 60_000 }, async ($, on) => {
+  const { clock } = beneath(on, () => fixture(), PREFS())
+  await $.session.start({ cwd: 'C:/x', surface: 'desktop', isInteractive: true })
+  await clock.advance(POLL_MS)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'help' })
+  const line = async () => (await ui.find({ key: 'reloading' })) !== undefined
+  const cards = async () => (await ui.find({ key: 'open:a1' })) !== undefined
+  /** A fault of the Client on screen, then the window back in range (what the live engine's own redraw hands). */
+  const fault = async () => {
+    expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
+    await ui.redraw(FAULTED)
+    await ui.redraw({ ...PANE.props })
+  }
+  // A SHORT FALL: the line, in Hebrew, and nothing of the cards; the retry brings the office back inside the quiet time
+  await fault()
+  expect(await ui.find({ type: 'Client' })).toBeUndefined()
+  expect([await line(), await cards()]).toEqual([true, false])
+  expect((await ui.find({ key: 'reloading' }))?.text ?? '').toMatch(/המשרד נטען מחדש/)
+  await clock.advance(CLIENT_RETRY_MS)
+  expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
+  expect([await line(), await cards()]).toEqual([false, false])
+  // ... and long after it, nothing comes back of that fall: the office stays drawn
+  await clock.advance(CLIENT_ALIVE_GAP_MS)
+  expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
+  // A FALL THAT LASTS (a new wave: CLIENT_ALIVE_GAP_MS since the last fault): the line until CLIENT_QUIET_MS after its first
+  // fault, the cards from that millisecond on — the retries in between draw the Client again and it falls again
+  await fault()
+  await clock.advance(CLIENT_QUIET_MS - 1)
+  expect(await ui.find({ type: 'Client' }) === undefined ? await line() : true).toBe(true)
+  expect(await cards()).toBe(false)
+  if ((await ui.find({ type: 'Client' })) !== undefined) await fault()   // (a retry came due: the office falls again, the same outage)
+  await clock.advance(1)
+  if ((await ui.find({ type: 'Client' })) !== undefined) await fault()
+  expect([await line(), await cards()]).toEqual([false, true])
+  expect(await ui.find({ type: 'Text', text: /משרד הסוכנים/ })).toBeDefined()
+  // the office back, and a fall CLIENT_ALIVE_GAP_MS later: a new wave — the line again, not the cards
+  await $.command.run(THEATER)
+  expect((await ui.find({ type: 'Client' }))?.key).toBe(OFFICE_KEY)
+  await clock.advance(CLIENT_ALIVE_GAP_MS)
+  await fault()
+  expect([await line(), await cards()]).toEqual([true, false])
+  // (reset: the flag and the wave are the plugin bundle's module memory)
+  await $.command.run(THEATER)
+  await ui.unmount()
 })

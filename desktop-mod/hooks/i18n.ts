@@ -83,7 +83,7 @@ export type Strings = {
    */
   demoNote: string; demoNoteMid: string; demoNoteShort: string; demoExit: string
   resultTruncated: string; searchPlaceholder: string; emptyNoMatch: string
-  mute: string; unmute: string; finishedToast: string; officeFailed: string
+  mute: string; unmute: string; finishedToast: string; officeFailed: string; officeReloading: string
   /** The finish toast's verb for a persona whose Hebrew name is feminine (personas.ts PERSONAS_HE_FEMININE): `סיימה`; English has one form. */
   finishedToastFem: string
   /** The five-hour usage toast (80% / 95%): the rounded percent and the reset's local HH:MM ('' when unknown). One line. */
@@ -132,6 +132,7 @@ export const I18N: Readonly<Record<Lang, Strings>> = {
     searchPlaceholder: 'Search agents…', emptyNoMatch: 'No agents match your search.',
     mute: 'Mute chime', unmute: 'Unmute chime', finishedToast: 'finished', finishedToastFem: 'finished',
     officeFailed: 'The office fell back to cards; trying again in a moment (/theater reopens it now)',
+    officeReloading: 'The office is reloading…',
     usageToast: (pct, reset) => `5-hour limit: ${pct}%${reset ? ` · resets ${reset}` : ''}`,
     srResults: n => `${n} agent${n === 1 ? '' : 's'} match`, srNoMatch: 'No agents match', srCleared: 'Search cleared',
     pin: 'Pin to top', unpin: 'Unpin',
@@ -167,6 +168,7 @@ export const I18N: Readonly<Record<Lang, Strings>> = {
     searchPlaceholder: 'חיפוש סוכנים…', emptyNoMatch: 'אין סוכנים שתואמים לחיפוש',
     mute: 'השתק צליל', unmute: 'בטל השתקה', finishedToast: 'סיים', finishedToastFem: 'סיימה',
     officeFailed: 'המשרד נפל לכרטיסים; מנסה שוב בעוד רגע (/theater פותח מיד)',
+    officeReloading: 'המשרד נטען מחדש…',
     usageToast: (pct, reset) => `נוצלו ${pct}% ממכסת 5 השעות${reset ? ` · איפוס ${reset}` : ''}`,
     srResults: n => `נמצאו ${n} סוכנים תואמים`, srNoMatch: 'אין סוכנים תואמים', srCleared: 'החיפוש נוקה',
     pin: 'נעץ למעלה', unpin: 'בטל נעיצה',

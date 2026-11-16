@@ -641,6 +641,12 @@ let clientTold = false
  */
 let clientHold: Timer | undefined
 /**
+ * THE RELOADING LINE (model.ts DESKTOP.cardsFrom): the redraw that lets the text cards in CLIENT_QUIET_MS after a wave's
+ * first fault — armed when a wave begins (a fault CLIENT_ALIVE_GAP_MS or more after the last), a redraw only if the office
+ * is still down then.
+ */
+let cardsTimer: Timer | undefined
+/**
  * THE RECORD (office-log.ts: what is kept, why one `$.store` key per entry, and what an entry can and cannot prove). THE
  * OUTAGE open now — opened by the first recorded fault, one fault more per recorded fault, closed by THE MOUNT NOTE of a
  * Client that drew again (the ui.message hook below), which writes `up`; null: none. /theater, a spawn and the retry timers
@@ -1228,6 +1234,8 @@ export const register: Register = on => {
         DESKTOP.clientFailed = true
         // (the engine's clock, for the wave: a read that fails counts as no gap)
         const now = await $.clock.now().catch(() => 0)
+        // (a new wave: the first fault since this load, or one CLIENT_ALIVE_GAP_MS or more after the last — THE RELOADING LINE below)
+        const freshWave = clientLastFaultAt === 0 || now - clientLastFaultAt >= CLIENT_ALIVE_GAP_MS
         if (clientLastFaultAt !== 0 && now - clientLastFaultAt >= CLIENT_ALIVE_GAP_MS) clientRetries = 0
         clientLastFaultAt = now
         // the retry is scheduled first: the log / toast below must not be able to lose it
@@ -1246,6 +1254,24 @@ export const register: Register = on => {
               $.ui.invalidate('ui.render')
             } catch {
               // nothing draws the pane now: its next draw is the Client's
+            }
+          })
+        }
+        // THE RELOADING LINE: a new wave draws one quiet line, not the text cards, for CLIENT_QUIET_MS from its first fault —
+        // a fall the office comes back from inside that never flips the pane to the cards and back. Counted from the WAVE
+        // (the retries' notion: faults less than CLIENT_ALIVE_GAP_MS apart), not the outage: a render fault comes from a Client
+        // that mounted and closed its outage, so a wave of them would restart the line on every fault and never let the cards
+        // in. Its redraw at the end lets them in
+        if (freshWave) {
+          DESKTOP.cardsFrom = now > 0 ? now + CLIENT_QUIET_MS : 0
+          cardsTimer?.cancel()
+          cardsTimer = $.clock.after(CLIENT_QUIET_MS, () => {
+            cardsTimer = undefined
+            if (!DESKTOP.clientFailed) return
+            try {
+              $.ui.invalidate('ui.render')
+            } catch {
+              // nothing draws the pane now: its next draw is the cards
             }
           })
         }

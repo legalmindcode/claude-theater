@@ -1036,6 +1036,16 @@ export function registerUi(on: On): void {
     //     Equal state → equal props → nothing redraws. Only where the surface's table has a Client (the
     //     capability, not the name: spec §5), and never while DESKTOP.clientFailed (a `ui.fault` of the module,
     //     register.tsx; /theater clears it): then the desktop falls through to the text cards below.
+    // --- THE RELOADING LINE (16.11): the office Client is down and the outage is younger than CLIENT_QUIET_MS — one quiet
+    //     line instead of the text cards, so a short fall never flips the pane to the cards and back (model.ts
+    //     DESKTOP.cardsFrom; register.tsx redraws when the cards may come in). Nothing is written here
+    if (e.surface === 'desktop' && 'Client' in els && DESKTOP.clientFailed && now < DESKTOP.cardsFrom) {
+      return (
+        <Box key="reloading" flexDirection={rtl ? 'row-reverse' : 'row'} width="100%" height={1} paddingX={1} overflow="hidden">
+          <Text dimColor>{`🎭 ${L.officeReloading}`}</Text>
+        </Box>
+      )
+    }
     if (e.surface === 'desktop' && 'Client' in els && !DESKTOP.clientFailed) {
       const { Client, Markdown } = els
       // the footer: the scan error alone (the too-long conversations ride the settings popover: buildOfficeProps `oversized`,

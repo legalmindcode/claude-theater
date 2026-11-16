@@ -264,7 +264,17 @@ export const USAGE = { fiveHour: null as { pct: number; resetsAt: string } | nul
  * CLIENT_RETRIES); read by ui.tsx's render. Module memory: a hot reload clears
  * it too.
  */
-export const DESKTOP = { clientFailed: false }
+export const DESKTOP = {
+  clientFailed: false,
+  /**
+   * THE RELOADING LINE (16.11, Asaf: "the office keeps falling to the old version and then steadies"): the engine's clock
+   * from which the text cards may draw while the office is down. Before it the desktop pane draws one quiet line instead
+   * (ui.tsx), so a fall the office comes back from within CLIENT_QUIET_MS never flips the pane to the cards and back. Set by
+   * register.tsx when a wave of faults begins (its first fault + CLIENT_QUIET_MS; a wave as the retries count it, faults
+   * less than CLIENT_ALIVE_GAP_MS apart); 0 — the cards at once — before any fault, or when the clock could not be read.
+   */
+  cardsFrom: 0,
+}
 
 /**
  * THE LOGO (decision 28b, 23.10): the small Legal Mind logo the desktop draws in its credit row (ui.tsx, at the row's
